@@ -21,3 +21,64 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# environment
+.env
+.env.*
+!.env.example
+
+# build outputs
+dist/
+
+# Next.js
+.next/
+out/
+
+# Vite/Parcel/Gatsby caches
+.cache/
+
+# Storybook
+storybook-static/
+
+# TypeScript
+*.tsbuildinfo
+
+# ESLint cache
+.eslintcache
+
+# Cypress
+cypress/videos/
+cypress/screenshots/
+cypress/downloads/
+
+# Playwright
+playwright-report/
+test-results/
+playwright/.cache/
+
+# Package manager logs and artifacts
+pnpm-debug.log*
+lerna-debug.log*
+*.tgz
+
+# Turbo
+.turbo/
+
+# Yarn (Berry) cache/state
+.yarn/cache/
+.yarn/unplugged/
+.yarn/build-state.yml
+.yarn/install-state.gz
+
+# OS-specific
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# IDEs/Editors
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
