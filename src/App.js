@@ -2,20 +2,47 @@ import React, { useState } from 'react';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import { Box, AppBar, Toolbar, Typography, Button, Drawer, List, ListItem, ListItemIcon, ListItemText, IconButton } from '@mui/material';
-import { Menu as MenuIcon, Map as MapIcon, Dashboard as DashboardIcon, Layers as LayersIcon, Settings as SettingsIcon } from '@mui/icons-material';
+import { 
+  Menu as MenuIcon, 
+  Dashboard as DashboardIcon, 
+  Layers as LayersIcon, 
+  Settings as SettingsIcon,
+  Analytics as AnalyticsIcon,
+  DataObject as DataObjectIcon,
+  ThreeDRotation as ThreeDIcon
+} from '@mui/icons-material';
 import MapView from './components/MapView';
 import AdminDashboard from './components/AdminDashboard';
 import LayerManager from './components/LayerManager';
+import DataVisualization from './components/DataVisualization';
+import DataManager from './components/DataManager';
 import './App.css';
 
 const theme = createTheme({
   palette: {
-    mode: 'light',
+    mode: 'dark',
     primary: {
-      main: '#1976d2',
+      main: '#00bcd4',
     },
     secondary: {
-      main: '#dc004e',
+      main: '#ff4081',
+    },
+    background: {
+      default: '#0a0a0a',
+      paper: '#1a1a1a',
+    },
+    text: {
+      primary: '#ffffff',
+      secondary: '#b0b0b0',
+    },
+  },
+  typography: {
+    fontFamily: '"Roboto", "Helvetica", "Arial", sans-serif',
+    h4: {
+      fontWeight: 600,
+    },
+    h6: {
+      fontWeight: 500,
     },
   },
 });
@@ -29,27 +56,25 @@ function App() {
   };
 
   const menuItems = [
-    { text: 'Map View', icon: <MapIcon />, view: 'map' },
-    { text: 'Admin Dashboard', icon: <DashboardIcon />, view: 'admin' },
-    { text: 'Layer Manager', icon: <LayersIcon />, view: 'layers' },
-    { text: 'Settings', icon: <SettingsIcon />, view: 'settings' },
+    { text: '3D Map Viewer', icon: <ThreeDIcon />, view: 'map' },
+    { text: 'Map Layers', icon: <LayersIcon />, view: 'layers' },
+    { text: 'Data Visualization', icon: <AnalyticsIcon />, view: 'visualization' },
+    { text: 'Data Manager', icon: <DataObjectIcon />, view: 'data' },
+    { text: 'Admin Dashboard', icon: <SettingsIcon />, view: 'admin' },
   ];
 
   const renderCurrentView = () => {
     switch (currentView) {
       case 'map':
         return <MapView />;
-      case 'admin':
-        return <AdminDashboard />;
       case 'layers':
         return <LayerManager />;
-      case 'settings':
-        return (
-          <Box sx={{ p: 3 }}>
-            <Typography variant="h4">Settings</Typography>
-            <Typography>Settings panel will be implemented here.</Typography>
-          </Box>
-        );
+      case 'visualization':
+        return <DataVisualization />;
+      case 'data':
+        return <DataManager />;
+      case 'admin':
+        return <AdminDashboard />;
       default:
         return <MapView />;
     }
@@ -71,7 +96,10 @@ function App() {
               <MenuIcon />
             </IconButton>
             <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-              GeoGIS - Professional Mapping Solution
+              GeoAnalytics Pro
+            </Typography>
+            <Typography variant="caption" sx={{ mr: 2, opacity: 0.7 }}>
+              Advanced GIS Platform
             </Typography>
             <Button color="inherit">Login</Button>
           </Toolbar>
