@@ -76,6 +76,8 @@ const MapView = () => {
   const [locationAccuracy, setLocationAccuracy] = useState(null);
   const [locationError, setLocationError] = useState(null);
   const [isLocating, setIsLocating] = useState(false);
+  const [isFlyingHome, setIsFlyingHome] = useState(false);
+  const locationWatchIdRef = useRef(null);
   
   // Click marker states
   const [clickMarker, setClickMarker] = useState(null);
@@ -171,6 +173,7 @@ const MapView = () => {
 
   // Component to handle map events
   const MapEvents = () => {
+    const map = useMap();
     useMapEvents({
       click: (e) => {
         const { lat, lng } = e.latlng;
@@ -196,6 +199,10 @@ const MapView = () => {
       },
       zoomend: (e) => {
         setZoom(e.target.getZoom());
+      },
+      moveend: () => {
+        if (isFlyingHome) setIsFlyingHome(false);
+        if (isLocating) setIsLocating(false);
       }
     });
     return null;
@@ -217,14 +224,16 @@ const MapView = () => {
     setIsLocating(true);
     setLocationError(null);
 
-    const options = {
-      enableHighAccuracy: true,
-      timeout: 10000,
-      maximumAge: 60000
-    };
+    // 1) Immediate feedback: fly to last known location if available
+    if (userLocation && mapRef.current) {
+      const target = [userLocation.lat, userLocation.lng];
+      const targetZoom = Math.max(mapRef.current.getZoom() || 12, 15);
+      mapRef.current.flyTo(target, targetZoom, { duration: 0.8, easeLinearity: 0.25 });
+    }
 
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
+    // 2) Quick coarse fix using cached location (fast response)
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
         const { latitude, longitude, accuracy } = position.coords;
         const locationData = {
           lat: latitude,
@@ -232,21 +241,50 @@ const MapView = () => {
           accuracy: accuracy,
           timestamp: new Date().toISOString()
         };
-        
         setUserLocation(locationData);
         setLocationAccuracy(accuracy);
-          setPosition([latitude, longitude]);
-        
-          if (mapRef.current) {
-          mapRef.current.setView([latitude, longitude], 16); // Higher zoom for precise location
-          }
-        
+        setPosition([latitude, longitude]);
+        if (mapRef.current) {
+          const targetZoom = Math.max(mapRef.current.getZoom() || 12, 15);
+          mapRef.current.flyTo([latitude, longitude], targetZoom, { duration: 0.9, easeLinearity: 0.25 });
+        }
+      },
+      (/* err */) => {
+        // ignore quick-fix failure; we'll rely on high-accuracy watch below
+      },
+      { enableHighAccuracy: false, timeout: 2000, maximumAge: 300000 }
+    );
+
+    // 3) High-accuracy refinement via watchPosition; clear after first precise fix
+    if (locationWatchIdRef.current !== null) {
+      try { navigator.geolocation.clearWatch(locationWatchIdRef.current); } catch (_) {}
+      locationWatchIdRef.current = null;
+    }
+    locationWatchIdRef.current = navigator.geolocation.watchPosition(
+      (position) => {
+        const { latitude, longitude, accuracy } = position.coords;
+        const locationData = {
+          lat: latitude,
+          lng: longitude,
+          accuracy: accuracy,
+          timestamp: new Date().toISOString()
+        };
+        setUserLocation(locationData);
+        setLocationAccuracy(accuracy);
+        setPosition([latitude, longitude]);
+        if (mapRef.current) {
+          const targetZoom = Math.max(mapRef.current.getZoom() || 12, 16);
+          mapRef.current.flyTo([latitude, longitude], targetZoom, { duration: 1.1, easeLinearity: 0.25 });
+        }
+        if (locationWatchIdRef.current !== null) {
+          try { navigator.geolocation.clearWatch(locationWatchIdRef.current); } catch (_) {}
+          locationWatchIdRef.current = null;
+        }
         setIsLocating(false);
-        },
-        (error) => {
-          console.error('Error getting location:', error);
+      },
+      (error) => {
+        console.error('Error getting location:', error);
         let errorMessage = 'Unable to get your location. ';
-        
         switch (error.code) {
           case error.PERMISSION_DENIED:
             errorMessage += 'Please enable location services and allow access.';
@@ -261,13 +299,26 @@ const MapView = () => {
             errorMessage += 'An unknown error occurred.';
             break;
         }
-        
         setLocationError(errorMessage);
         setIsLocating(false);
+        if (locationWatchIdRef.current !== null) {
+          try { navigator.geolocation.clearWatch(locationWatchIdRef.current); } catch (_) {}
+          locationWatchIdRef.current = null;
+        }
       },
-      options
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
   };
+
+  // Cleanup any outstanding geolocation watch on unmount
+  useEffect(() => {
+    return () => {
+      if (locationWatchIdRef.current !== null) {
+        try { navigator.geolocation.clearWatch(locationWatchIdRef.current); } catch (_) {}
+        locationWatchIdRef.current = null;
+      }
+    };
+  }, []);
 
   const handleZoomIn = () => {
     if (mapRef.current) {
@@ -565,7 +616,14 @@ const MapView = () => {
           }}
         >
           <Tooltip title="Home">
-            <IconButton onClick={() => setPosition([37.7749, -122.4194])} sx={{ color: 'white' }}>
+            <IconButton onClick={() => {
+              const home = [37.7749, -122.4194];
+              setIsFlyingHome(true);
+              setPosition(home);
+              if (mapRef.current) {
+                mapRef.current.flyTo(home, mapRef.current.getZoom(), { duration: 1.2, easeLinearity: 0.25 });
+              }
+            }} sx={{ color: 'white', animation: isFlyingHome ? 'pulse 1.2s ease-in-out infinite' : 'none' }}>
               <HomeIcon />
             </IconButton>
           </Tooltip>
