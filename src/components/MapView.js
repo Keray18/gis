@@ -42,7 +42,8 @@ import {
   Analytics as AnalyticsIcon,
   FilterList as FilterIcon,
   Refresh as RefreshIcon,
-  Home as HomeIcon
+  Home as HomeIcon,
+  Delete as DeleteIcon
 } from '@mui/icons-material';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -69,6 +70,16 @@ const MapView = () => {
   const [drawingMode, setDrawingMode] = useState(false);
   const [drawnShapes, setDrawnShapes] = useState([]);
   const [layerOpacity, setLayerOpacity] = useState(100);
+  
+  // Location pinpointing states
+  const [userLocation, setUserLocation] = useState(null);
+  const [locationAccuracy, setLocationAccuracy] = useState(null);
+  const [locationError, setLocationError] = useState(null);
+  const [isLocating, setIsLocating] = useState(false);
+  
+  // Click marker states
+  const [clickMarker, setClickMarker] = useState(null);
+  const [clickMarkerPosition, setClickMarkerPosition] = useState(null);
   
   const [mapLayers, setMapLayers] = useState([
     { 
@@ -115,7 +126,9 @@ const MapView = () => {
       opacity: 0.7, 
       type: 'raster',
       color: '#ff6b6b',
-      description: 'Population density visualization'
+      description: 'Population density visualization',
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Demographics/USA_Population_Density/MapServer/tile/{z}/{y}/{x}',
+      attribution: '&copy; Esri'
     },
     { 
       name: 'Transportation', 
@@ -123,7 +136,9 @@ const MapView = () => {
       opacity: 0.8, 
       type: 'vector',
       color: '#4ecdc4',
-      description: 'Transportation networks'
+      description: 'Transportation networks',
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
+      attribution: '&copy; Esri'
     },
     { 
       name: 'Land Use', 
@@ -131,7 +146,9 @@ const MapView = () => {
       opacity: 0.6, 
       type: 'raster',
       color: '#45b7d1',
-      description: 'Land use classification'
+      description: 'Land use classification',
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Physical_Map/MapServer/tile/{z}/{y}/{x}',
+      attribution: '&copy; Esri'
     },
     { 
       name: 'Elevation', 
@@ -139,7 +156,9 @@ const MapView = () => {
       opacity: 0.5, 
       type: 'raster',
       color: '#96ceb4',
-      description: 'Digital elevation model'
+      description: 'Digital elevation model',
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Terrain_Base/MapServer/tile/{z}/{y}/{x}',
+      attribution: '&copy; Esri'
     }
   ]);
 
@@ -154,13 +173,25 @@ const MapView = () => {
   const MapEvents = () => {
     useMapEvents({
       click: (e) => {
+        const { lat, lng } = e.latlng;
+        
         if (measurementMode) {
           const newMarker = {
             id: Date.now(),
-            position: [e.latlng.lat, e.latlng.lng],
+            position: [lat, lng],
             timestamp: new Date().toISOString()
           };
           setMarkers(prev => [...prev, newMarker]);
+        } else {
+          // Click to place marker functionality
+          const markerData = {
+            lat: lat,
+            lng: lng,
+            timestamp: new Date().toISOString()
+          };
+          setClickMarker(markerData);
+          setClickMarkerPosition([lat, lng]);
+          setPosition([lat, lng]); // Update center position
         }
       },
       zoomend: (e) => {
@@ -178,21 +209,64 @@ const MapView = () => {
   };
 
   const handleLocationClick = () => {
-    if (navigator.geolocation) {
+    if (!navigator.geolocation) {
+      setLocationError('Geolocation is not supported by this browser.');
+      return;
+    }
+
+    setIsLocating(true);
+    setLocationError(null);
+
+    const options = {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 60000
+    };
+
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          const { latitude, longitude } = position.coords;
+        const { latitude, longitude, accuracy } = position.coords;
+        const locationData = {
+          lat: latitude,
+          lng: longitude,
+          accuracy: accuracy,
+          timestamp: new Date().toISOString()
+        };
+        
+        setUserLocation(locationData);
+        setLocationAccuracy(accuracy);
           setPosition([latitude, longitude]);
+        
           if (mapRef.current) {
-            mapRef.current.setView([latitude, longitude], 15);
+          mapRef.current.setView([latitude, longitude], 16); // Higher zoom for precise location
           }
+        
+        setIsLocating(false);
         },
         (error) => {
           console.error('Error getting location:', error);
-          alert('Unable to get your location. Please enable location services.');
+        let errorMessage = 'Unable to get your location. ';
+        
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            errorMessage += 'Please enable location services and allow access.';
+            break;
+          case error.POSITION_UNAVAILABLE:
+            errorMessage += 'Location information is unavailable.';
+            break;
+          case error.TIMEOUT:
+            errorMessage += 'Location request timed out.';
+            break;
+          default:
+            errorMessage += 'An unknown error occurred.';
+            break;
         }
-      );
-    }
+        
+        setLocationError(errorMessage);
+        setIsLocating(false);
+      },
+      options
+    );
   };
 
   const handleZoomIn = () => {
@@ -221,7 +295,7 @@ const MapView = () => {
   const switchLayer = (layerName) => {
     setMapLayers(prev => prev.map(layer => ({
       ...layer,
-      active: layer.name === layerName
+      active: layer.name === layerName && layer.type === 'base'
     })));
   };
 
@@ -256,23 +330,132 @@ const MapView = () => {
           <MapRef />
           <MapEvents />
           
+          {/* Base Map Layers */}
+          {mapLayers.map((layer) => (
           <TileLayer
-            attribution={getActiveLayer()?.attribution}
-            url={getActiveLayer()?.url}
-            opacity={layerOpacity / 100}
-          />
+              key={layer.name}
+              attribution={layer.attribution}
+              url={layer.url}
+              opacity={layer.active ? layerOpacity / 100 : 0}
+              zIndex={layer.active ? 1 : 0}
+            />
+          ))}
 
           {/* Data Layers */}
           {dataLayers.filter(layer => layer.visible).map((layer, index) => (
             <TileLayer
               key={layer.name}
-              url={`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}`}
+              url={layer.url}
+              attribution={layer.attribution}
               opacity={layer.opacity}
               zIndex={1000 + index}
             />
           ))}
 
-          {/* Markers */}
+          {/* User Location Marker */}
+          {userLocation && (
+            <>
+              <Marker 
+                position={[userLocation.lat, userLocation.lng]}
+                icon={L.divIcon({
+                  className: 'custom-location-marker',
+                  html: `
+                    <div style="
+                      background: #00bcd4;
+                      border: 3px solid white;
+                      border-radius: 50%;
+                      width: 20px;
+                      height: 20px;
+                      box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+                      position: relative;
+                    ">
+                      <div style="
+                        position: absolute;
+                        top: 50%;
+                        left: 50%;
+                        transform: translate(-50%, -50%);
+                        background: white;
+                        border-radius: 50%;
+                        width: 8px;
+                        height: 8px;
+                      "></div>
+                    </div>
+                  `,
+                  iconSize: [20, 20],
+                  iconAnchor: [10, 10]
+                })}
+              >
+                <Popup>
+                  <Typography variant="body2">
+                    <strong>Your Location</strong><br />
+                    <strong>Coordinates:</strong><br />
+                    Lat: {userLocation.lat.toFixed(6)}<br />
+                    Lng: {userLocation.lng.toFixed(6)}<br />
+                    <strong>Accuracy:</strong> ±{Math.round(userLocation.accuracy)}m<br />
+                    <strong>Time:</strong> {new Date(userLocation.timestamp).toLocaleString()}
+                  </Typography>
+                </Popup>
+              </Marker>
+              
+              {/* Accuracy Circle */}
+              <Circle
+                center={[userLocation.lat, userLocation.lng]}
+                radius={userLocation.accuracy}
+                pathOptions={{
+                  color: '#00bcd4',
+                  fillColor: '#00bcd4',
+                  fillOpacity: 0.1,
+                  weight: 2,
+                  dashArray: '5, 5'
+                }}
+              />
+            </>
+          )}
+
+          {/* Click Marker */}
+          {clickMarker && (
+            <Marker 
+              position={[clickMarker.lat, clickMarker.lng]}
+              icon={L.divIcon({
+                className: 'custom-click-marker',
+                html: `
+                  <div style="
+                    background: #ff4081;
+                    border: 3px solid white;
+                    border-radius: 50%;
+                    width: 24px;
+                    height: 24px;
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+                    position: relative;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                  ">
+                    <div style="
+                      color: white;
+                      font-weight: bold;
+                      font-size: 12px;
+                      line-height: 1;
+                    ">📍</div>
+                  </div>
+                `,
+                iconSize: [24, 24],
+                iconAnchor: [12, 12]
+              })}
+            >
+              <Popup>
+                <Typography variant="body2">
+                  <strong>Selected Location</strong><br />
+                  <strong>Coordinates:</strong><br />
+                  Lat: {clickMarker.lat.toFixed(6)}<br />
+                  Lng: {clickMarker.lng.toFixed(6)}<br />
+                  <strong>Time:</strong> {new Date(clickMarker.timestamp).toLocaleString()}
+                </Typography>
+              </Popup>
+            </Marker>
+          )}
+
+          {/* Measurement Markers */}
           {markers.map((marker) => (
             <Marker key={marker.id} position={marker.position}>
               <Popup>
@@ -387,8 +570,15 @@ const MapView = () => {
             </IconButton>
           </Tooltip>
           
-          <Tooltip title="My Location">
-            <IconButton onClick={handleLocationClick} sx={{ color: 'white' }}>
+          <Tooltip title={isLocating ? "Locating..." : "My Location"}>
+            <IconButton 
+              onClick={handleLocationClick} 
+              disabled={isLocating}
+              sx={{ 
+                color: isLocating ? '#ffa500' : 'white',
+                animation: isLocating ? 'pulse 1.5s ease-in-out infinite' : 'none'
+              }}
+            >
               <MyLocationIcon />
             </IconButton>
           </Tooltip>
@@ -402,6 +592,22 @@ const MapView = () => {
           <Tooltip title="Zoom Out">
             <IconButton onClick={handleZoomOut} sx={{ color: 'white' }}>
               <ZoomOutIcon />
+            </IconButton>
+          </Tooltip>
+          
+          <Tooltip title="Clear Marker">
+            <IconButton 
+              onClick={() => {
+                setClickMarker(null);
+                setClickMarkerPosition(null);
+              }} 
+              disabled={!clickMarker}
+              sx={{ 
+                color: clickMarker ? '#ff4081' : 'rgba(255,255,255,0.3)',
+                opacity: clickMarker ? 1 : 0.5
+              }}
+            >
+              <DeleteIcon />
             </IconButton>
           </Tooltip>
           
@@ -419,25 +625,49 @@ const MapView = () => {
             bottom: 16,
             left: 16,
             zIndex: 1000,
-            p: 1,
-            display: 'flex',
-            gap: 1,
+            p: 2,
             background: 'rgba(0,0,0,0.8)',
-            backdropFilter: 'blur(10px)'
+            backdropFilter: 'blur(10px)',
+            minWidth: 200
           }}
         >
+          <Typography variant="subtitle2" sx={{ color: 'white', mb: 1 }}>
+            Base Layers
+          </Typography>
           {mapLayers.map((layer) => (
-            <Chip
-              key={layer.name}
-              label={layer.name}
+            <Box key={layer.name} sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+              <Box sx={{ mr: 1, color: 'white' }}>
+                {layer.name === 'Satellite' && <SatelliteIcon sx={{ fontSize: 16 }} />}
+                {layer.name === 'OpenStreetMap' && <MapIcon sx={{ fontSize: 16 }} />}
+                {layer.name === 'Terrain' && <TerrainIcon sx={{ fontSize: 16 }} />}
+                {layer.name === 'Hybrid' && <MapIcon sx={{ fontSize: 16 }} />}
+                {layer.name === 'Dark' && <MapIcon sx={{ fontSize: 16 }} />}
+              </Box>
+              <Typography 
+                variant="body2" 
+                sx={{ 
+                  color: 'white', 
+                  flexGrow: 1,
+                  cursor: 'pointer'
+                }}
               onClick={() => switchLayer(layer.name)}
-              color={layer.active ? "primary" : "default"}
+              >
+                {layer.name}
+              </Typography>
+              <Switch
+                checked={layer.active}
+                onChange={() => switchLayer(layer.name)}
               size="small"
               sx={{ 
-                color: layer.active ? 'white' : 'rgba(255,255,255,0.7)',
-                bgcolor: layer.active ? '#00bcd4' : 'rgba(255,255,255,0.1)'
-              }}
-            />
+                  '& .MuiSwitch-switchBase.Mui-checked': {
+                    color: '#00bcd4',
+                  },
+                  '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': {
+                    backgroundColor: '#00bcd4',
+                  },
+                }}
+              />
+            </Box>
           ))}
         </Paper>
 
@@ -482,6 +712,70 @@ const MapView = () => {
           </Paper>
         )}
 
+        {/* Location Error Display */}
+        {locationError && (
+          <Paper
+            sx={{
+              position: 'absolute',
+              top: 80,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              zIndex: 1000,
+              p: 2,
+              px: 3,
+              background: 'rgba(244, 67, 54, 0.9)',
+              backdropFilter: 'blur(10px)',
+              color: 'white',
+              maxWidth: 400,
+              textAlign: 'center'
+            }}
+          >
+            <Typography variant="body2">
+              {locationError}
+            </Typography>
+            <Button
+              size="small"
+              onClick={() => setLocationError(null)}
+              sx={{ color: 'white', mt: 1 }}
+            >
+              Dismiss
+            </Button>
+          </Paper>
+        )}
+
+        {/* Location Status Display */}
+        {userLocation && (
+          <Paper
+            sx={{
+              position: 'absolute',
+              top: 80,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              zIndex: 1000,
+              p: 1,
+              px: 2,
+              background: 'rgba(76, 175, 80, 0.9)',
+              backdropFilter: 'blur(10px)',
+              color: 'white',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1
+            }}
+          >
+            <MyLocationIcon sx={{ fontSize: 16 }} />
+            <Typography variant="caption">
+              Location found! Accuracy: ±{Math.round(userLocation.accuracy)}m
+            </Typography>
+            <Button
+              size="small"
+              onClick={() => setUserLocation(null)}
+              sx={{ color: 'white', minWidth: 'auto', p: 0.5 }}
+            >
+              ×
+            </Button>
+          </Paper>
+        )}
+
         {/* Coordinate Display */}
         <Paper
           sx={{
@@ -498,7 +792,16 @@ const MapView = () => {
           }}
         >
           <Typography variant="caption">
-            Lat: {position[0].toFixed(4)} Lng: {position[1].toFixed(4)} Zoom: {zoom}
+            {clickMarker ? (
+              <>
+                <strong>Selected:</strong> Lat: {clickMarker.lat.toFixed(6)} Lng: {clickMarker.lng.toFixed(6)} | 
+                Zoom: {zoom}
+              </>
+            ) : (
+              <>
+                Center: Lat: {position[0].toFixed(4)} Lng: {position[1].toFixed(4)} | Zoom: {zoom}
+              </>
+            )}
           </Typography>
         </Paper>
       </Box>

@@ -542,3 +542,4 @@ const DataVisualization = () => {
 };
 
 export default DataVisualization;
+

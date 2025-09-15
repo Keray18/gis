@@ -35,6 +35,34 @@
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
+/* Location marker styles */
+.custom-location-marker {
+  background: transparent !important;
+  border: none !important;
+}
+
+/* Click marker styles */
+.custom-click-marker {
+  background: transparent !important;
+  border: none !important;
+}
+
+/* Pulsing animation for location button */
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
 /* Responsive adjustments */
 @media (max-width: 768px) {
   .search-bar {
