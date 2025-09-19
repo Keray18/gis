@@ -4,7 +4,6 @@ import CssBaseline from '@mui/material/CssBaseline';
 import { Box, AppBar, Toolbar, Typography, Button, Drawer, List, ListItem, ListItemIcon, ListItemText, IconButton } from '@mui/material';
 import { 
   Menu as MenuIcon, 
-  Dashboard as DashboardIcon, 
   Layers as LayersIcon, 
   Settings as SettingsIcon,
   Analytics as AnalyticsIcon,
@@ -16,6 +15,7 @@ import AdminDashboard from './components/AdminDashboard';
 import LayerManager from './components/LayerManager';
 import DataVisualization from './components/DataVisualization';
 import DataManager from './components/DataManager';
+import Auth from './pages/Auth';
 import './App.css';
 
 const theme = createTheme({
@@ -49,6 +49,7 @@ const theme = createTheme({
 
 function App() {
   const [currentView, setCurrentView] = useState('map');
+  const [isAuthed, setIsAuthed] = useState(() => !!localStorage.getItem('authToken'));
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const handleDrawerToggle = () => {
@@ -64,6 +65,16 @@ function App() {
   ];
 
   const renderCurrentView = () => {
+    if (!isAuthed) {
+      return (
+        <Auth onSubmit={(data) => {
+          // Successful auth handled in child; ensure app reflects it
+          setIsAuthed(true);
+          setCurrentView('map');
+          return Promise.resolve();
+        }} />
+      );
+    }
     switch (currentView) {
       case 'map':
         return <MapView />;
@@ -75,6 +86,12 @@ function App() {
         return <DataManager />;
       case 'admin':
         return <AdminDashboard />;
+      case 'auth':
+        return <Auth onSubmit={(data) => {
+          setIsAuthed(true);
+          setCurrentView('map');
+          return Promise.resolve();
+        }} />;
       default:
         return <MapView />;
     }
@@ -86,61 +103,78 @@ function App() {
       <Box sx={{ display: 'flex', height: '100vh' }}>
         <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
           <Toolbar>
-            <IconButton
-              color="inherit"
-              aria-label="open drawer"
-              edge="start"
-              onClick={handleDrawerToggle}
-              sx={{ mr: 2 }}
-            >
-              <MenuIcon />
-            </IconButton>
+            {isAuthed && (
+              <IconButton
+                color="inherit"
+                aria-label="open drawer"
+                edge="start"
+                onClick={handleDrawerToggle}
+                sx={{ mr: 2 }}
+              >
+                <MenuIcon />
+              </IconButton>
+            )}
             <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
               GeoAnalytics Pro
             </Typography>
             <Typography variant="caption" sx={{ mr: 2, opacity: 0.7 }}>
               Advanced GIS Platform
             </Typography>
-            <Button color="inherit">Login</Button>
+            {!isAuthed ? (
+              <Button color="inherit" onClick={() => setCurrentView('auth')}>Login</Button>
+            ) : (
+              <Button
+                color="inherit"
+                onClick={() => {
+                  localStorage.removeItem('authToken');
+                  setIsAuthed(false);
+                  setCurrentView('auth');
+                }}
+              >
+                Logout
+              </Button>
+            )}
           </Toolbar>
         </AppBar>
 
-        <Drawer
-          variant="temporary"
-          open={drawerOpen}
-          onClose={handleDrawerToggle}
-          ModalProps={{
-            keepMounted: true,
-          }}
-          sx={{
-            width: 240,
-            flexShrink: 0,
-            '& .MuiDrawer-paper': {
+        {isAuthed && (
+          <Drawer
+            variant="temporary"
+            open={drawerOpen}
+            onClose={handleDrawerToggle}
+            ModalProps={{
+              keepMounted: true,
+            }}
+            sx={{
               width: 240,
-              boxSizing: 'border-box',
-            },
-          }}
-        >
-          <Toolbar />
-          <Box sx={{ overflow: 'auto' }}>
-            <List>
-              {menuItems.map((item) => (
-                <ListItem
-                  button
-                  key={item.text}
-                  onClick={() => {
-                    setCurrentView(item.view);
-                    setDrawerOpen(false);
-                  }}
-                  selected={currentView === item.view}
-                >
-                  <ListItemIcon>{item.icon}</ListItemIcon>
-                  <ListItemText primary={item.text} />
-                </ListItem>
-              ))}
-            </List>
-          </Box>
-        </Drawer>
+              flexShrink: 0,
+              '& .MuiDrawer-paper': {
+                width: 240,
+                boxSizing: 'border-box',
+              },
+            }}
+          >
+            <Toolbar />
+            <Box sx={{ overflow: 'auto' }}>
+              <List>
+                {menuItems.map((item) => (
+                  <ListItem
+                    button
+                    key={item.text}
+                    onClick={() => {
+                      setCurrentView(item.view);
+                      setDrawerOpen(false);
+                    }}
+                    selected={currentView === item.view}
+                  >
+                    <ListItemIcon>{item.icon}</ListItemIcon>
+                    <ListItemText primary={item.text} />
+                  </ListItem>
+                ))}
+              </List>
+            </Box>
+          </Drawer>
+        )}
 
         <Box
           component="main"

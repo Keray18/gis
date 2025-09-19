@@ -21,7 +21,9 @@ import {
   ListItemText,
   ListItemIcon,
   Divider,
-  Badge
+  Badge,
+  Backdrop,
+  CircularProgress
 } from '@mui/material';
 import { 
   MyLocation as MyLocationIcon, 
@@ -900,6 +902,11 @@ const MapView = () => {
             )}
           </Typography>
         </Paper>
+
+        {/* Global loading overlay for transitions */}
+        <Backdrop open={isLocating || isFlyingHome} sx={{ color: '#fff', zIndex: 1200, background: 'rgba(0,0,0,0.2)' }}>
+          <CircularProgress color="inherit" size={36} />
+        </Backdrop>
       </Box>
 
       {/* Right Sidebar - Layers, Analysis, Alerts */}
