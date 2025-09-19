@@ -78,6 +78,7 @@ const MapView = () => {
   const [isLocating, setIsLocating] = useState(false);
   const [isFlyingHome, setIsFlyingHome] = useState(false);
   const locationWatchIdRef = useRef(null);
+  const locationWatchTimeoutRef = useRef(null);
   
   // Click marker states
   const [clickMarker, setClickMarker] = useState(null);
@@ -224,6 +225,18 @@ const MapView = () => {
     setIsLocating(true);
     setLocationError(null);
 
+    // Quick permission check to fail fast if denied
+    try {
+      if (navigator.permissions && navigator.permissions.query) {
+        navigator.permissions.query({ name: 'geolocation' }).then((result) => {
+          if (result.state === 'denied') {
+            setLocationError('Location is blocked. Please allow location access in your browser settings.');
+            setIsLocating(false);
+          }
+        }).catch(() => {});
+      }
+    } catch (_) {}
+
     // 1) Immediate feedback: fly to last known location if available
     if (userLocation && mapRef.current) {
       const target = [userLocation.lat, userLocation.lng];
@@ -252,7 +265,7 @@ const MapView = () => {
       (/* err */) => {
         // ignore quick-fix failure; we'll rely on high-accuracy watch below
       },
-      { enableHighAccuracy: false, timeout: 2000, maximumAge: 300000 }
+      { enableHighAccuracy: false, timeout: 1500, maximumAge: 300000 }
     );
 
     // 3) High-accuracy refinement via watchPosition; clear after first precise fix
@@ -279,6 +292,10 @@ const MapView = () => {
         if (locationWatchIdRef.current !== null) {
           try { navigator.geolocation.clearWatch(locationWatchIdRef.current); } catch (_) {}
           locationWatchIdRef.current = null;
+        }
+        if (locationWatchTimeoutRef.current) {
+          clearTimeout(locationWatchTimeoutRef.current);
+          locationWatchTimeoutRef.current = null;
         }
         setIsLocating(false);
       },
@@ -308,6 +325,23 @@ const MapView = () => {
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
+
+    // Hard cutoff so UI doesn't hang if watch never resolves
+    if (locationWatchTimeoutRef.current) {
+      clearTimeout(locationWatchTimeoutRef.current);
+    }
+    locationWatchTimeoutRef.current = setTimeout(() => {
+      if (locationWatchIdRef.current !== null) {
+        try { navigator.geolocation.clearWatch(locationWatchIdRef.current); } catch (_) {}
+        locationWatchIdRef.current = null;
+      }
+      // If we already have a coarse or cached location, don't alarm the user
+      if (!userLocation) {
+        setLocationError('Unable to get your location. Location request timed out.');
+      }
+      setIsLocating(false);
+      locationWatchTimeoutRef.current = null;
+    }, 7000);
   };
 
   // Cleanup any outstanding geolocation watch on unmount
@@ -316,6 +350,10 @@ const MapView = () => {
       if (locationWatchIdRef.current !== null) {
         try { navigator.geolocation.clearWatch(locationWatchIdRef.current); } catch (_) {}
         locationWatchIdRef.current = null;
+      }
+      if (locationWatchTimeoutRef.current) {
+        clearTimeout(locationWatchTimeoutRef.current);
+        locationWatchTimeoutRef.current = null;
       }
     };
   }, []);
