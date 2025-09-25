@@ -45,11 +45,14 @@ import {
   FilterList as FilterIcon,
   Refresh as RefreshIcon,
   Home as HomeIcon,
-  Delete as DeleteIcon
+  Delete as DeleteIcon,
+  Settings as SettingsIcon,
+  Edit as EditIcon
 } from '@mui/icons-material';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './MapView.css';
+import { listLayers, getLayerFeatures, queryLayerAttribute, queryLayerBuffer, queryPointInPolygon, createFeature, updateFeature, deleteFeature } from '../services/api';
 
 // Fix for default markers in react-leaflet
 delete L.Icon.Default.prototype._getIconUrl;
@@ -173,6 +176,30 @@ const MapView = () => {
   ]);
 
   const mapRef = useRef();
+
+  const [serverLayers, setServerLayers] = useState([]);
+  const [serverLayerFeatures, setServerLayerFeatures] = useState({}); // layerId -> FeatureCollection
+  const [searchResults, setSearchResults] = useState([]);
+  const [selectedLayerForStyling, setSelectedLayerForStyling] = useState(null);
+  const [editingMode, setEditingMode] = useState(false);
+  const [selectedFeature, setSelectedFeature] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const resp = await listLayers();
+        const layers = resp?.data || resp?.data?.data || [];
+        setServerLayers(layers.map(l => ({ ...l, visible: true })));
+        // Preload small feature sets
+        for (const l of layers) {
+          try {
+            const fc = await getLayerFeatures(l._id, { limit: 1000 });
+            setServerLayerFeatures(prev => ({ ...prev, [l._id]: fc?.data || fc }));
+          } catch (_) {}
+        }
+      } catch (_) {}
+    })();
+  }, []);
 
   // Component to handle map events
   const MapEvents = () => {
@@ -443,6 +470,61 @@ const MapView = () => {
             />
           ))}
 
+          {/* Server Vector Layers (simple styled) */}
+          {serverLayers.filter(l => l.visible).map((l, idx) => {
+            const fc = serverLayerFeatures[l._id];
+            if (!fc || !fc.features) return null;
+            return fc.features.map((f, i) => {
+              const color = l?.style?.simple?.color || '#00bcd4';
+              const weight = l?.style?.simple?.weight || 2;
+              const fillOpacity = l?.style?.simple?.fillOpacity ?? 0.3;
+              if (f.geometry?.type === 'Point') {
+                const [lng, lat] = f.geometry.coordinates;
+                return (
+                  <Marker 
+                    key={`${l._id}-pt-${i}`} 
+                    position={[lat, lng]}
+                    eventHandlers={{
+                      click: () => {
+                        if (editingMode) {
+                          setSelectedFeature({ ...f, layerId: l._id, layerName: l.name });
+                        }
+                      }
+                    }}
+                  >
+                    <Popup>
+                      <Typography variant="caption">{l.name}</Typography>
+                      {editingMode && (
+                        <Box sx={{ mt: 1 }}>
+                          <Button 
+                            size="small" 
+                            variant="outlined"
+                            onClick={() => setSelectedFeature({ ...f, layerId: l._id, layerName: l.name })}
+                          >
+                            Edit
+                          </Button>
+                        </Box>
+                      )}
+                    </Popup>
+                  </Marker>
+                );
+              }
+              if (f.geometry?.type === 'LineString') {
+                const positions = f.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+                return (
+                  <Polyline key={`${l._id}-ln-${i}`} positions={positions} pathOptions={{ color, weight }} />
+                );
+              }
+              if (f.geometry?.type === 'Polygon') {
+                const positions = f.geometry.coordinates[0].map(([lng, lat]) => [lat, lng]);
+                return (
+                  <Polygon key={`${l._id}-pg-${i}`} positions={positions} pathOptions={{ color, weight, fillOpacity }} />
+                );
+              }
+              return null;
+            });
+          })}
+
           {/* User Location Marker */}
           {userLocation && (
             <>
@@ -606,8 +688,29 @@ const MapView = () => {
               ),
             }}
           />
-          <Button variant="contained" size="small" sx={{ bgcolor: '#00bcd4' }}>
-            Load
+          <Button 
+            variant="contained" 
+            size="small" 
+            sx={{ bgcolor: '#00bcd4' }}
+            onClick={async () => {
+              if (!searchQuery.trim()) return;
+              try {
+                // Simple attribute search across all layers
+                for (const layer of serverLayers) {
+                  try {
+                    const results = await queryLayerAttribute(layer._id, { 
+                      field: 'name', 
+                      regex: searchQuery 
+                    });
+                    if (results?.data?.features?.length > 0) {
+                      setSearchResults(prev => [...prev, ...results.data.features]);
+                    }
+                  } catch (_) {}
+                }
+              } catch (_) {}
+            }}
+          >
+            Search
           </Button>
         </Paper>
 
@@ -706,6 +809,18 @@ const MapView = () => {
               }}
             >
               <DeleteIcon />
+            </IconButton>
+          </Tooltip>
+          
+          <Tooltip title="Toggle Edit Mode">
+            <IconButton 
+              onClick={() => setEditingMode(!editingMode)}
+              sx={{ 
+                color: editingMode ? '#ff4081' : 'white',
+                bgcolor: editingMode ? 'rgba(255,64,129,0.2)' : 'transparent'
+              }}
+            >
+              <EditIcon />
             </IconButton>
           </Tooltip>
           
@@ -1045,6 +1160,41 @@ const MapView = () => {
               </AccordionDetails>
             </Accordion>
 
+            {/* Server Vector Layers */}
+            <Accordion sx={{ mb: 2, bgcolor: 'rgba(255,255,255,0.05)' }}>
+              <AccordionSummary expandIcon={<ExpandMoreIcon sx={{ color: 'white' }} />}>
+                <Typography sx={{ color: 'white' }}>Uploaded Vector Layers</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                <List dense>
+                  {serverLayers.map((l, idx) => (
+                    <ListItem key={l._id} sx={{ px: 0 }}>
+                      <ListItemIcon>
+                        <Box sx={{ width: 16, height: 16, bgcolor: l?.style?.simple?.color || '#00bcd4', borderRadius: '50%' }} />
+                      </ListItemIcon>
+                      <ListItemText primary={l.name} secondary={`${l.geometryType} • ${l.featureCount} features`} sx={{ color: 'white', '& .MuiListItemText-secondary': { color: 'rgba(255,255,255,0.6)' } }} />
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Switch
+                          checked={!!l.visible}
+                          onChange={(e) => {
+                            setServerLayers(prev => prev.map(x => x._id === l._id ? { ...x, visible: e.target.checked } : x));
+                          }}
+                          size="small"
+                        />
+                        <IconButton 
+                          size="small" 
+                          onClick={() => setSelectedLayerForStyling(l)}
+                          sx={{ color: 'white' }}
+                        >
+                          <SettingsIcon />
+                        </IconButton>
+                      </Box>
+                    </ListItem>
+                  ))}
+                </List>
+              </AccordionDetails>
+            </Accordion>
+
             {/* Raster Data */}
             <Accordion sx={{ mb: 2, bgcolor: 'rgba(255,255,255,0.05)' }}>
               <AccordionSummary expandIcon={<ExpandMoreIcon sx={{ color: 'white' }} />}>
@@ -1103,8 +1253,18 @@ const MapView = () => {
               variant="outlined"
               startIcon={<AnalyticsIcon />}
               sx={{ mb: 2, borderColor: '#00bcd4', color: '#00bcd4' }}
+              onClick={async () => {
+                if (serverLayers.length === 0) return;
+                try {
+                  const layer = serverLayers[0];
+                  const results = await queryLayerBuffer(layer._id, { distance: 1000 });
+                  if (results?.data?.features) {
+                    setSearchResults(results.data.features);
+                  }
+                } catch (_) {}
+              }}
             >
-              Buffer Analysis
+              Buffer Analysis (1km)
             </Button>
             <Button
               fullWidth
@@ -1163,6 +1323,202 @@ const MapView = () => {
           </Box>
         )}
       </Paper>
+
+      {/* Layer Styling Dialog */}
+      {selectedLayerForStyling && (
+        <Paper
+          sx={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            zIndex: 2000,
+            p: 3,
+            minWidth: 300,
+            background: 'rgba(0,0,0,0.9)',
+            backdropFilter: 'blur(10px)',
+            color: 'white'
+          }}
+        >
+          <Typography variant="h6" gutterBottom>
+            Style Layer: {selectedLayerForStyling.name}
+          </Typography>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Box>
+              <Typography variant="body2" gutterBottom>Color</Typography>
+              <input
+                type="color"
+                value={selectedLayerForStyling?.style?.simple?.color || '#00bcd4'}
+                onChange={(e) => {
+                  setServerLayers(prev => prev.map(l => 
+                    l._id === selectedLayerForStyling._id 
+                      ? { ...l, style: { ...l.style, simple: { ...l.style?.simple, color: e.target.value } } }
+                      : l
+                  ));
+                  setSelectedLayerForStyling(prev => ({ 
+                    ...prev, 
+                    style: { ...prev.style, simple: { ...prev.style?.simple, color: e.target.value } } 
+                  }));
+                }}
+                style={{ width: '100%', height: 40, border: 'none', borderRadius: 4 }}
+              />
+            </Box>
+            <Box>
+              <Typography variant="body2" gutterBottom>Weight: {selectedLayerForStyling?.style?.simple?.weight || 2}</Typography>
+              <Slider
+                value={selectedLayerForStyling?.style?.simple?.weight || 2}
+                onChange={(e, value) => {
+                  setServerLayers(prev => prev.map(l => 
+                    l._id === selectedLayerForStyling._id 
+                      ? { ...l, style: { ...l.style, simple: { ...l.style?.simple, weight: value } } }
+                      : l
+                  ));
+                  setSelectedLayerForStyling(prev => ({ 
+                    ...prev, 
+                    style: { ...prev.style, simple: { ...prev.style?.simple, weight: value } } 
+                  }));
+                }}
+                min={1}
+                max={10}
+                sx={{ color: '#00bcd4' }}
+              />
+            </Box>
+            <Box>
+              <Typography variant="body2" gutterBottom>Fill Opacity: {Math.round((selectedLayerForStyling?.style?.simple?.fillOpacity || 0.3) * 100)}%</Typography>
+              <Slider
+                value={(selectedLayerForStyling?.style?.simple?.fillOpacity || 0.3) * 100}
+                onChange={(e, value) => {
+                  const opacity = value / 100;
+                  setServerLayers(prev => prev.map(l => 
+                    l._id === selectedLayerForStyling._id 
+                      ? { ...l, style: { ...l.style, simple: { ...l.style?.simple, fillOpacity: opacity } } }
+                      : l
+                  ));
+                  setSelectedLayerForStyling(prev => ({ 
+                    ...prev, 
+                    style: { ...prev.style, simple: { ...prev.style?.simple, fillOpacity: opacity } } 
+                  }));
+                }}
+                min={0}
+                max={100}
+                sx={{ color: '#00bcd4' }}
+              />
+            </Box>
+            <Button
+              variant="contained"
+              onClick={() => setSelectedLayerForStyling(null)}
+              sx={{ bgcolor: '#00bcd4' }}
+            >
+              Close
+            </Button>
+          </Box>
+        </Paper>
+      )}
+
+      {/* Feature Edit Dialog */}
+      {selectedFeature && (
+        <Paper
+          sx={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            zIndex: 2000,
+            p: 3,
+            minWidth: 400,
+            background: 'rgba(0,0,0,0.9)',
+            backdropFilter: 'blur(10px)',
+            color: 'white'
+          }}
+        >
+          <Typography variant="h6" gutterBottom>
+            Edit Feature - {selectedFeature.layerName}
+          </Typography>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <TextField
+              label="Feature Name"
+              value={selectedFeature.properties?.name || ''}
+              onChange={(e) => setSelectedFeature(prev => ({
+                ...prev,
+                properties: { ...prev.properties, name: e.target.value }
+              }))}
+              fullWidth
+              size="small"
+              sx={{ 
+                '& .MuiOutlinedInput-root': { color: 'white' },
+                '& .MuiInputLabel-root': { color: 'white' }
+              }}
+            />
+            <TextField
+              label="Description"
+              value={selectedFeature.properties?.description || ''}
+              onChange={(e) => setSelectedFeature(prev => ({
+                ...prev,
+                properties: { ...prev.properties, description: e.target.value }
+              }))}
+              fullWidth
+              multiline
+              rows={2}
+              size="small"
+              sx={{ 
+                '& .MuiOutlinedInput-root': { color: 'white' },
+                '& .MuiInputLabel-root': { color: 'white' }
+              }}
+            />
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Button
+                variant="contained"
+                onClick={async () => {
+                  try {
+                    if (selectedFeature._id) {
+                      await updateFeature(selectedFeature.layerId, selectedFeature._id, selectedFeature);
+                    } else {
+                      await createFeature(selectedFeature.layerId, selectedFeature);
+                    }
+                    setSelectedFeature(null);
+                    // Refresh layer data
+                    const resp = await listLayers();
+                    const layers = resp?.data || resp?.data?.data || [];
+                    setServerLayers(layers.map(l => ({ ...l, visible: true })));
+                  } catch (e) {
+                    console.error('Failed to save feature:', e);
+                  }
+                }}
+                sx={{ bgcolor: '#00bcd4' }}
+              >
+                Save
+              </Button>
+              <Button
+                variant="outlined"
+                onClick={() => setSelectedFeature(null)}
+                sx={{ borderColor: '#00bcd4', color: '#00bcd4' }}
+              >
+                Cancel
+              </Button>
+              {selectedFeature._id && (
+                <Button
+                  variant="outlined"
+                  color="error"
+                  onClick={async () => {
+                    try {
+                      await deleteFeature(selectedFeature.layerId, selectedFeature._id);
+                      setSelectedFeature(null);
+                      // Refresh layer data
+                      const resp = await listLayers();
+                      const layers = resp?.data || resp?.data?.data || [];
+                      setServerLayers(layers.map(l => ({ ...l, visible: true })));
+                    } catch (e) {
+                      console.error('Failed to delete feature:', e);
+                    }
+                  }}
+                >
+                  Delete
+                </Button>
+              )}
+            </Box>
+          </Box>
+        </Paper>
+      )}
 
       {/* Success Message */}
       <Paper

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Box,
   Paper,
@@ -54,11 +54,13 @@ import {
   Folder as FolderIcon,
   Map as MapIcon,
   DataObject as DataObjectIcon,
+  TableChart as TableChartIcon,
   Satellite as SatelliteIcon,
   Terrain as TerrainIcon,
   Refresh as RefreshIcon,
   Settings as SettingsIcon
 } from '@mui/icons-material';
+import { uploadDataset, listDatasets, getLayerFeatures } from '../services/api';
 
 const DataManager = () => {
   const [tabValue, setTabValue] = useState(0);
@@ -68,88 +70,7 @@ const DataManager = () => {
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const fileInputRef = useRef(null);
 
-  const [datasets, setDatasets] = useState([
-    {
-      id: 1,
-      name: 'Urban Infrastructure',
-      type: 'Shapefile',
-      size: '15.2 MB',
-      format: 'SHP',
-      status: 'processed',
-      uploadDate: '2024-01-15',
-      lastModified: '2024-01-15',
-      description: 'Urban infrastructure data including roads, buildings, and utilities',
-      layers: 8,
-      features: 12500,
-      projection: 'WGS84',
-      bounds: '37.7749, -122.4194, 37.7849, -122.4094',
-      tags: ['infrastructure', 'urban', 'planning']
-    },
-    {
-      id: 2,
-      name: 'Population Density',
-      type: 'GeoTIFF',
-      size: '8.7 MB',
-      format: 'TIF',
-      status: 'processing',
-      uploadDate: '2024-01-14',
-      lastModified: '2024-01-14',
-      description: 'Population density raster data from census',
-      layers: 1,
-      features: 0,
-      projection: 'WGS84',
-      bounds: '37.7749, -122.4194, 37.7849, -122.4094',
-      tags: ['population', 'census', 'raster']
-    },
-    {
-      id: 3,
-      name: 'Environmental Zones',
-      type: 'GeoJSON',
-      size: '3.1 MB',
-      format: 'JSON',
-      status: 'processed',
-      uploadDate: '2024-01-13',
-      lastModified: '2024-01-13',
-      description: 'Environmental protection zones and sensitive areas',
-      layers: 3,
-      features: 450,
-      projection: 'WGS84',
-      bounds: '37.7749, -122.4194, 37.7849, -122.4094',
-      tags: ['environment', 'zones', 'protection']
-    },
-    {
-      id: 4,
-      name: 'Transportation Network',
-      type: 'KML',
-      size: '2.8 MB',
-      format: 'KML',
-      status: 'error',
-      uploadDate: '2024-01-12',
-      lastModified: '2024-01-12',
-      description: 'Public transportation routes and stops',
-      layers: 2,
-      features: 0,
-      projection: 'WGS84',
-      bounds: '37.7749, -122.4194, 37.7849, -122.4094',
-      tags: ['transportation', 'public', 'routes']
-    },
-    {
-      id: 5,
-      name: 'Satellite Imagery',
-      type: 'GeoTIFF',
-      size: '45.3 MB',
-      format: 'TIF',
-      status: 'processed',
-      uploadDate: '2024-01-11',
-      lastModified: '2024-01-11',
-      description: 'High-resolution satellite imagery from Landsat 8',
-      layers: 4,
-      features: 0,
-      projection: 'UTM Zone 10N',
-      bounds: '37.7749, -122.4194, 37.7849, -122.4094',
-      tags: ['satellite', 'imagery', 'landsat']
-    }
-  ]);
+  const [datasets, setDatasets] = useState([]);
 
   const [supportedFormats] = useState([
     { name: 'Shapefile', extensions: ['.shp', '.shx', '.dbf', '.prj'], icon: <MapIcon />, color: '#1976d2' },
@@ -190,51 +111,118 @@ const DataManager = () => {
     return formatInfo ? formatInfo.color : '#666';
   };
 
-  const handleFileUpload = (event) => {
+  useEffect(() => {
+    (async () => {
+      try {
+        const resp = await listDatasets();
+        setDatasets(resp?.data || resp?.data?.data || []);
+      } catch (_) {}
+    })();
+  }, []);
+
+  const handleFileUpload = async (event) => {
     const files = Array.from(event.target.files);
     if (files.length === 0) return;
 
     setIsUploading(true);
     setUploadProgress(0);
 
-    // Simulate upload progress
-    const interval = setInterval(() => {
-      setUploadProgress(prev => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          setIsUploading(false);
-          setSnackbar({ open: true, message: 'Files uploaded successfully', severity: 'success' });
-          
-          // Add new datasets
-          const newDatasets = files.map((file, index) => ({
-            id: Date.now() + index,
-            name: file.name.split('.')[0],
-            type: getFileType(file.name),
-            size: formatFileSize(file.size),
-            format: file.name.split('.').pop().toUpperCase(),
-            status: 'processed',
-            uploadDate: new Date().toISOString().split('T')[0],
-            lastModified: new Date().toISOString().split('T')[0],
-            description: `Uploaded file: ${file.name}`,
-            layers: 1,
-            features: Math.floor(Math.random() * 1000),
-            projection: 'WGS84',
-            bounds: '37.7749, -122.4194, 37.7849, -122.4094',
-            tags: ['uploaded', 'new']
-          }));
-          
-          setDatasets(prev => [...newDatasets, ...prev]);
-          return 100;
-        }
-        return prev + 10;
-      });
-    }, 200);
+    for (const file of files) {
+      try {
+        await uploadDataset(file);
+        setUploadProgress((p) => Math.min(100, p + Math.ceil(100 / files.length)));
+      } catch (e) {
+        setSnackbar({ open: true, message: e?.message || 'Upload failed', severity: 'error' });
+      }
+    }
+    try {
+      const resp = await listDatasets();
+      setDatasets(resp?.data || resp?.data?.data || []);
+      setSnackbar({ open: true, message: 'Files uploaded successfully', severity: 'success' });
+    } catch (_) {}
+    setIsUploading(false);
   };
 
   const getFileType = (filename) => {
     const ext = filename.split('.').pop().toLowerCase();
     const format = supportedFormats.find(f => f.extensions.includes(`.${ext}`));
     return format ? format.name : 'Unknown';
+  };
+
+  const handleExport = async (dataset, format) => {
+    try {
+      if (format === 'geojson') {
+        // Get all features for the dataset's layers
+        const allFeatures = [];
+        for (const layer of dataset.layers || []) {
+          try {
+            const featuresResp = await getLayerFeatures(layer._id);
+            const features = featuresResp?.data?.features || featuresResp?.data?.data?.features || [];
+            allFeatures.push(...features);
+          } catch (e) {
+            console.error(`Failed to get features for layer ${layer._id}:`, e);
+          }
+        }
+        
+        const geojson = {
+          type: 'FeatureCollection',
+          features: allFeatures
+        };
+        
+        const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${dataset.name}.geojson`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else if (format === 'csv') {
+        // Convert to CSV
+        const allFeatures = [];
+        for (const layer of dataset.layers || []) {
+          try {
+            const featuresResp = await getLayerFeatures(layer._id);
+            const features = featuresResp?.data?.features || featuresResp?.data?.data?.features || [];
+            allFeatures.push(...features);
+          } catch (e) {
+            console.error(`Failed to get features for layer ${layer._id}:`, e);
+          }
+        }
+        
+        if (allFeatures.length === 0) return;
+        
+        // Get all unique property keys
+        const allKeys = new Set();
+        allFeatures.forEach(f => {
+          if (f.properties) {
+            Object.keys(f.properties).forEach(k => allKeys.add(k));
+          }
+        });
+        
+        const headers = ['id', 'type', 'coordinates', ...Array.from(allKeys)];
+        const csvRows = [headers.join(',')];
+        
+        allFeatures.forEach(f => {
+          const row = [
+            f._id || '',
+            f.geometry?.type || '',
+            JSON.stringify(f.geometry?.coordinates || []),
+            ...Array.from(allKeys).map(k => `"${(f.properties?.[k] || '').toString().replace(/"/g, '""')}"`)
+          ];
+          csvRows.push(row.join(','));
+        });
+        
+        const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${dataset.name}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (error) {
+      console.error('Export failed:', error);
+    }
   };
 
   const formatFileSize = (bytes) => {
@@ -355,7 +343,7 @@ const DataManager = () => {
         
         <List>
           {datasets.map((dataset) => (
-            <Paper key={dataset.id} sx={{ mb: 1, p: 1 }}>
+            <Paper key={dataset._id || dataset.id} sx={{ mb: 1, p: 1 }}>
               <ListItem>
                 <ListItemIcon>
                   <Box sx={{ color: getFormatColor(dataset.type) }}>
@@ -387,20 +375,20 @@ const DataManager = () => {
                       </Typography>
                       <Box sx={{ display: 'flex', gap: 2, mt: 1 }}>
                         <Typography variant="caption">
-                          Size: {dataset.size}
+                          Size: {dataset.filesize ? formatFileSize(dataset.filesize) : '—'}
                         </Typography>
                         <Typography variant="caption">
-                          Uploaded: {dataset.uploadDate}
+                          Uploaded: {dataset.createdAt ? new Date(dataset.createdAt).toLocaleDateString() : '—'}
                         </Typography>
                         <Typography variant="caption">
-                          Features: {dataset.features.toLocaleString()}
+                          Features: {Number(dataset.featureCount || dataset.features || 0).toLocaleString()}
                         </Typography>
                         <Typography variant="caption">
-                          Layers: {dataset.layers}
+                          Layers: {dataset.layers || (dataset.layer ? 1 : 1)}
                         </Typography>
                       </Box>
                       <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
-                        {dataset.tags.map((tag, index) => (
+                        {(dataset.tags || []).map((tag, index) => (
                           <Chip key={index} label={tag} size="small" variant="outlined" />
                         ))}
                       </Box>
@@ -414,9 +402,14 @@ const DataManager = () => {
                         <VisibilityIcon />
                       </IconButton>
                     </Tooltip>
-                    <Tooltip title="Download">
-                      <IconButton onClick={() => handleDownload(dataset)}>
+                    <Tooltip title="Export GeoJSON">
+                      <IconButton onClick={() => handleExport(dataset, 'geojson')}>
                         <DownloadIcon />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Export CSV">
+                      <IconButton onClick={() => handleExport(dataset, 'csv')}>
+                        <TableChartIcon />
                       </IconButton>
                     </Tooltip>
                     <Tooltip title="Reprocess">
