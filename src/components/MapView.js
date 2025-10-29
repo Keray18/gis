@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents, Circle, Polygon, Polyline } from 'react-leaflet';
+import GeometryOperations from './GeometryOperations';
+import QueryPanel from './QueryPanel';
 import { 
   Box, 
   Paper, 
@@ -52,7 +54,8 @@ import {
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './MapView.css';
-import { listLayers, getLayerFeatures, queryLayerAttribute, queryLayerBuffer, queryPointInPolygon, createFeature, updateFeature, deleteFeature } from '../services/api';
+import { listLayers, getLayerFeatures, queryLayerAttribute, queryLayerBuffer, queryPointInPolygon, createFeature, updateFeature, deleteFeature, getRasterTileUrl, updateRasterStyling } from '../services/api';
+import RasterStylePanel from './RasterStylePanel';
 
 // Fix for default markers in react-leaflet
 delete L.Icon.Default.prototype._getIconUrl;
@@ -88,6 +91,11 @@ const MapView = () => {
   // Click marker states
   const [clickMarker, setClickMarker] = useState(null);
   const [clickMarkerPosition, setClickMarkerPosition] = useState(null);
+  
+  // Query results state
+  const [queryResults, setQueryResults] = useState(null);
+  const [highlightedFeatures, setHighlightedFeatures] = useState([]);
+  const [analysisResults, setAnalysisResults] = useState([]); // Track analysis results
   
   const [mapLayers, setMapLayers] = useState([
     { 
@@ -183,18 +191,52 @@ const MapView = () => {
   const [selectedLayerForStyling, setSelectedLayerForStyling] = useState(null);
   const [editingMode, setEditingMode] = useState(false);
   const [selectedFeature, setSelectedFeature] = useState(null);
+  const [rasterStylePanel, setRasterStylePanel] = useState({ open: false, layer: null });
+
+  const handleRasterStyleUpdate = async (style) => {
+    if (!rasterStylePanel.layer) return;
+    
+    console.log('Updating raster style:', style);
+    console.log('Layer:', rasterStylePanel.layer);
+    
+    try {
+      await updateRasterStyling(rasterStylePanel.layer._id, style);
+      // Update the layer in the serverLayers state
+      setServerLayers(prev => prev.map(layer => 
+        layer._id === rasterStylePanel.layer._id 
+          ? { ...layer, style: { ...layer.style, raster: style } }
+          : layer
+      ));
+      console.log('Raster style updated successfully');
+    } catch (error) {
+      console.error('Error updating raster style:', error);
+    }
+  };
+
+  const openRasterStylePanel = (layer) => {
+    setRasterStylePanel({ open: true, layer });
+  };
+
+  const closeRasterStylePanel = () => {
+    setRasterStylePanel({ open: false, layer: null });
+  };
 
   useEffect(() => {
     (async () => {
       try {
         const resp = await listLayers();
-        const layers = resp?.data || resp?.data?.data || [];
+        const layers = resp?.data?.layers || resp?.data || [];
+        console.log('Layers API response:', resp);
+        console.log('Layers array:', layers);
         setServerLayers(layers.map(l => ({ ...l, visible: true })));
         // Preload small feature sets
         for (const l of layers) {
           try {
-            const fc = await getLayerFeatures(l._id, { limit: 1000 });
-            setServerLayerFeatures(prev => ({ ...prev, [l._id]: fc?.data || fc }));
+            // Only get features for vector layers, not raster layers
+            if (l.type !== 'raster') {
+              const fc = await getLayerFeatures(l._id, { limit: 1000 });
+              setServerLayerFeatures(prev => ({ ...prev, [l._id]: fc?.data || fc }));
+            }
           } catch (_) {}
         }
       } catch (_) {}
@@ -470,8 +512,38 @@ const MapView = () => {
             />
           ))}
 
+          {/* Server Raster Layers */}
+          {serverLayers.filter(l => l.visible && l.type === 'raster').map((l, idx) => {
+            if (!l.source?.datasetId) return null;
+            
+            const rasterStyle = l.style?.raster || {};
+            const styleOptions = {
+              colorRamp: rasterStyle.colorRamp || 'viridis',
+              stretchType: rasterStyle.stretchType || 'linear',
+              opacity: rasterStyle.opacity || 1.0,
+              bands: rasterStyle.bands ? [rasterStyle.bands.red, rasterStyle.bands.green, rasterStyle.bands.blue] : [0, 1, 2],
+              minValue: rasterStyle.stretchParams?.minValue,
+              maxValue: rasterStyle.stretchParams?.maxValue,
+              blendingMode: rasterStyle.blendingMode || 'normal'
+            };
+            
+            console.log(`Rendering raster layer ${l.name} with style:`, styleOptions);
+            
+            const tileUrl = getRasterTileUrl(l.source.datasetId._id || l.source.datasetId, '{z}', '{x}', '{y}', styleOptions);
+            
+            return (
+              <TileLayer
+                key={`raster-${l._id}`}
+                url={tileUrl}
+                opacity={rasterStyle.opacity || 1.0}
+                zIndex={1000 + idx}
+                attribution={`Raster layer: ${l.name}`}
+              />
+            );
+          })}
+
           {/* Server Vector Layers (simple styled) */}
-          {serverLayers.filter(l => l.visible).map((l, idx) => {
+          {serverLayers.filter(l => l.visible && l.type !== 'raster').map((l, idx) => {
             const fc = serverLayerFeatures[l._id];
             if (!fc || !fc.features) return null;
             return fc.features.map((f, i) => {
@@ -523,6 +595,84 @@ const MapView = () => {
               }
               return null;
             });
+          })}
+
+          {/* Query Results Highlighting */}
+          {highlightedFeatures.map((f, i) => {
+            const highlightColor = '#ff6b6b'; // Red highlight color
+            const highlightWeight = 4;
+            const highlightFillOpacity = 0.6;
+            
+            if (f.geometry?.type === 'Point') {
+              const [lng, lat] = f.geometry.coordinates;
+              return (
+                <Marker 
+                  key={`query-result-pt-${i}`} 
+                  position={[lat, lng]}
+                  icon={L.divIcon({
+                    className: 'query-result-marker',
+                    html: `<div style="
+                      width: 20px; 
+                      height: 20px; 
+                      background-color: ${highlightColor}; 
+                      border: 3px solid white; 
+                      border-radius: 50%; 
+                      box-shadow: 0 0 10px rgba(255, 107, 107, 0.8);
+                    "></div>`,
+                    iconSize: [20, 20],
+                    iconAnchor: [10, 10]
+                  })}
+                >
+                  <Popup>
+                    <Typography variant="subtitle2" color="primary">
+                      Query Result
+                    </Typography>
+                    <Typography variant="body2">
+                      Feature {i + 1} of {highlightedFeatures.length}
+                    </Typography>
+                    {f.properties && Object.keys(f.properties).length > 0 && (
+                      <Box sx={{ mt: 1 }}>
+                        {Object.entries(f.properties).slice(0, 3).map(([key, value]) => (
+                          <Typography key={key} variant="caption" display="block">
+                            <strong>{key}:</strong> {String(value)}
+                          </Typography>
+                        ))}
+                      </Box>
+                    )}
+                  </Popup>
+                </Marker>
+              );
+            }
+            if (f.geometry?.type === 'LineString') {
+              const positions = f.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+              return (
+                <Polyline 
+                  key={`query-result-ln-${i}`} 
+                  positions={positions} 
+                  pathOptions={{ 
+                    color: highlightColor, 
+                    weight: highlightWeight,
+                    opacity: 0.8
+                  }} 
+                />
+              );
+            }
+            if (f.geometry?.type === 'Polygon') {
+              const positions = f.geometry.coordinates[0].map(([lng, lat]) => [lat, lng]);
+              return (
+                <Polygon 
+                  key={`query-result-pg-${i}`} 
+                  positions={positions} 
+                  pathOptions={{ 
+                    color: highlightColor, 
+                    weight: highlightWeight, 
+                    fillOpacity: highlightFillOpacity,
+                    opacity: 0.8
+                  }} 
+                />
+              );
+            }
+            return null;
           })}
 
           {/* User Location Marker */}
@@ -712,6 +862,23 @@ const MapView = () => {
           >
             Search
           </Button>
+          
+          <Button 
+            variant="outlined" 
+            size="small" 
+            sx={{ 
+              borderColor: '#00bcd4', 
+              color: '#00bcd4',
+              '&:hover': { borderColor: '#00acc1', bgcolor: 'rgba(0,188,212,0.1)' }
+            }}
+            onClick={() => {
+              // This will be handled by the QueryPanel component
+              console.log('Advanced Query button clicked');
+            }}
+          >
+            <FilterIcon sx={{ mr: 1 }} />
+            Advanced Query
+          </Button>
         </Paper>
 
         {/* 3D Map Generator Section */}
@@ -821,6 +988,19 @@ const MapView = () => {
               }}
             >
               <EditIcon />
+            </IconButton>
+          </Tooltip>
+          
+          <Tooltip title="Clear Query Results">
+            <IconButton 
+              onClick={() => setHighlightedFeatures([])}
+              disabled={highlightedFeatures.length === 0}
+              sx={{ 
+                color: highlightedFeatures.length > 0 ? '#ff6b6b' : 'rgba(255,255,255,0.3)',
+                opacity: highlightedFeatures.length > 0 ? 1 : 0.5
+              }}
+            >
+              <FilterIcon />
             </IconButton>
           </Tooltip>
           
@@ -1167,7 +1347,7 @@ const MapView = () => {
               </AccordionSummary>
               <AccordionDetails>
                 <List dense>
-                  {serverLayers.map((l, idx) => (
+                  {serverLayers.filter(l => l.type !== 'raster').map((l, idx) => (
                     <ListItem key={l._id} sx={{ px: 0 }}>
                       <ListItemIcon>
                         <Box sx={{ width: 16, height: 16, bgcolor: l?.style?.simple?.color || '#00bcd4', borderRadius: '50%' }} />
@@ -1181,13 +1361,23 @@ const MapView = () => {
                           }}
                           size="small"
                         />
-                        <IconButton 
-                          size="small" 
-                          onClick={() => setSelectedLayerForStyling(l)}
-                          sx={{ color: 'white' }}
-                        >
-                          <SettingsIcon />
-                        </IconButton>
+                        {l.type === 'raster' ? (
+                          <IconButton 
+                            size="small" 
+                            onClick={() => openRasterStylePanel(l)}
+                            sx={{ color: 'white' }}
+                          >
+                            <SettingsIcon />
+                          </IconButton>
+                        ) : (
+                          <IconButton 
+                            size="small" 
+                            onClick={() => setSelectedLayerForStyling(l)}
+                            sx={{ color: 'white' }}
+                          >
+                            <SettingsIcon />
+                          </IconButton>
+                        )}
                       </Box>
                     </ListItem>
                   ))}
@@ -1220,18 +1410,45 @@ const MapView = () => {
                   </Button>
                 </Box>
                 <List dense>
-                  {rasterData.map((data, index) => (
-                    <ListItem key={data.name} sx={{ px: 0 }}>
+                  {serverLayers.filter(l => l.type === 'raster').map((l, idx) => (
+                    <ListItem key={l._id} sx={{ px: 0 }}>
+                      <ListItemIcon>
+                        <Box sx={{ width: 16, height: 16, bgcolor: '#7b1fa2', borderRadius: '50%' }} />
+                      </ListItemIcon>
                       <ListItemText 
-                        primary={data.name}
-                        secondary={`${data.bands} bands, ${data.resolution}, ${data.date}`}
+                        primary={l.name}
+                        secondary={`${l.rasterMetadata?.bands?.length || 'Unknown'} bands • ${l.rasterMetadata?.width || 'Unknown'}x${l.rasterMetadata?.height || 'Unknown'}`}
                         sx={{ 
                           color: 'white',
                           '& .MuiListItemText-secondary': { color: 'rgba(255,255,255,0.6)' }
                         }}
                       />
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Switch
+                          checked={!!l.visible}
+                          onChange={(e) => {
+                            setServerLayers(prev => prev.map(x => x._id === l._id ? { ...x, visible: e.target.checked } : x));
+                          }}
+                          size="small"
+                        />
+                        <IconButton 
+                          size="small" 
+                          onClick={() => openRasterStylePanel(l)}
+                          sx={{ color: 'white' }}
+                        >
+                          <SettingsIcon />
+                        </IconButton>
+                      </Box>
                     </ListItem>
                   ))}
+                  {serverLayers.filter(l => l.type === 'raster').length === 0 && (
+                    <ListItem sx={{ px: 0 }}>
+                      <ListItemText 
+                        primary="No raster layers uploaded"
+                        sx={{ color: 'rgba(255,255,255,0.6)', textAlign: 'center' }}
+                      />
+                    </ListItem>
+                  )}
                 </List>
               </AccordionDetails>
             </Accordion>
@@ -1240,56 +1457,48 @@ const MapView = () => {
 
         {/* Analysis Panel */}
         {showAnalysisPanel && (
-          <Box sx={{ p: 2, flex: 1, overflow: 'auto' }}>
-            <Typography variant="h6" gutterBottom sx={{ color: 'white' }}>
-              Spatial Analysis
-            </Typography>
-            <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.7)', mb: 2 }}>
-              Advanced geoprocessing tools and analysis capabilities.
-            </Typography>
-            
-            <Button
-              fullWidth
-              variant="outlined"
-              startIcon={<AnalyticsIcon />}
-              sx={{ mb: 2, borderColor: '#00bcd4', color: '#00bcd4' }}
-              onClick={async () => {
-                if (serverLayers.length === 0) return;
-                try {
-                  const layer = serverLayers[0];
-                  const results = await queryLayerBuffer(layer._id, { distance: 1000 });
-                  if (results?.data?.features) {
-                    setSearchResults(results.data.features);
-                  }
-                } catch (_) {}
+          <Box sx={{ flex: 1, overflow: 'auto' }}>
+            <GeometryOperations 
+              selectedLayers={serverLayers}
+              onResultsUpdate={(result) => {
+                // Handle analysis results
+                console.log('Analysis result:', result);
+                
+                // Store the analysis result
+                setAnalysisResults(prev => [result, ...prev]);
+                
+                // Add analysis results to highlighted features for map display
+                if (result && result.features && result.features.length > 0) {
+                  setHighlightedFeatures(prev => [...prev, ...result.features]);
+                }
               }}
-            >
-              Buffer Analysis (1km)
-            </Button>
-            <Button
-              fullWidth
-              variant="outlined"
-              startIcon={<AnalyticsIcon />}
-              sx={{ mb: 2, borderColor: '#00bcd4', color: '#00bcd4' }}
-            >
-              Intersection
-            </Button>
-            <Button
-              fullWidth
-              variant="outlined"
-              startIcon={<AnalyticsIcon />}
-              sx={{ mb: 2, borderColor: '#00bcd4', color: '#00bcd4' }}
-            >
-              Proximity Analysis
-            </Button>
-            <Button
-              fullWidth
-              variant="outlined"
-              startIcon={<AnalyticsIcon />}
-              sx={{ mb: 2, borderColor: '#00bcd4', color: '#00bcd4' }}
-            >
-              Overlay Analysis
-            </Button>
+              onResultVisibilityChange={(resultId, visible) => {
+                console.log('Result visibility changed:', resultId, visible);
+                // Update highlighted features based on visibility
+                setHighlightedFeatures(prev => {
+                  if (visible) {
+                    // Show features for this result ID - find the result and add its features
+                    const result = analysisResults.find(r => r.id === resultId);
+                    if (result && result.features) {
+                      // Remove any existing features for this result ID first
+                      const filteredPrev = prev.filter(feature => feature.resultId !== resultId);
+                      return [...filteredPrev, ...result.features];
+                    }
+                    return prev;
+                  } else {
+                    // Hide features for this result ID
+                    return prev.filter(feature => feature.resultId !== resultId);
+                  }
+                });
+              }}
+              onResultDelete={(resultId) => {
+                console.log('Result deleted:', resultId);
+                // Remove from analysis results
+                setAnalysisResults(prev => prev.filter(r => r.id !== resultId));
+                // Remove features for this result ID from map
+                setHighlightedFeatures(prev => prev.filter(feature => feature.resultId !== resultId));
+              }}
+            />
           </Box>
         )}
 
@@ -1478,7 +1687,7 @@ const MapView = () => {
                     setSelectedFeature(null);
                     // Refresh layer data
                     const resp = await listLayers();
-                    const layers = resp?.data || resp?.data?.data || [];
+                    const layers = resp?.data?.layers || resp?.data || [];
                     setServerLayers(layers.map(l => ({ ...l, visible: true })));
                   } catch (e) {
                     console.error('Failed to save feature:', e);
@@ -1505,7 +1714,7 @@ const MapView = () => {
                       setSelectedFeature(null);
                       // Refresh layer data
                       const resp = await listLayers();
-                      const layers = resp?.data || resp?.data?.data || [];
+                      const layers = resp?.data?.layers || resp?.data || [];
                       setServerLayers(layers.map(l => ({ ...l, visible: true })));
                     } catch (e) {
                       console.error('Failed to delete feature:', e);
@@ -1518,6 +1727,24 @@ const MapView = () => {
             </Box>
           </Box>
         </Paper>
+      )}
+
+      {/* Raster Style Panel */}
+      {rasterStylePanel.open && (
+        <Box
+          sx={{
+            position: 'absolute',
+            top: 20,
+            right: 20,
+            zIndex: 2000
+          }}
+        >
+          <RasterStylePanel
+            layer={rasterStylePanel.layer}
+            onStyleUpdate={handleRasterStyleUpdate}
+            onClose={closeRasterStylePanel}
+          />
+        </Box>
       )}
 
       {/* Success Message */}
@@ -1539,6 +1766,22 @@ const MapView = () => {
           Success - Loaded GeoTIFF imagery with 4 bands
         </Typography>
       </Paper>
+
+      {/* Query Panel */}
+      <QueryPanel
+        onResultsUpdate={(results) => {
+          console.log('Query results updated:', results);
+          setQueryResults(results);
+        }}
+        onHighlightFeatures={(features) => {
+          console.log('Highlighting features:', features);
+          setHighlightedFeatures(features);
+        }}
+        onClearHighlight={() => {
+          console.log('Clearing highlight');
+          setHighlightedFeatures([]);
+        }}
+      />
     </Box>
   );
 };

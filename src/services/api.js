@@ -101,14 +101,20 @@ export async function uploadDataset(file) {
 }
 
 export function listDatasets() {
-  return request('api/datasets', { headers: { ...authHeaders() } });
+  return request(`api/datasets?t=${Date.now()}`, { 
+    headers: { 
+      ...authHeaders(),
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache'
+    } 
+  });
 }
 
 export function getLayerFeatures(layerId, { q, limit } = {}) {
   const params = new URLSearchParams();
   if (q) params.set('q', q);
   if (limit) params.set('limit', String(limit));
-  const path = `api/datasets/${layerId}/features${params.toString() ? `?${params.toString()}` : ''}`;
+  const path = `api/layers/${layerId}/features${params.toString() ? `?${params.toString()}` : ''}`;
   return request(path, { headers: { ...authHeaders() } });
 }
 
@@ -143,7 +149,7 @@ export function queryPointInPolygon(layerId, { point }) {
 
 // Feature CRUD
 export function createFeature(layerId, feature) {
-  return request(`api/datasets/${layerId}/features`, {
+  return request(`api/layers/${layerId}/features`, {
     method: 'POST',
     headers: { ...authHeaders() },
     body: JSON.stringify(feature)
@@ -151,7 +157,7 @@ export function createFeature(layerId, feature) {
 }
 
 export function updateFeature(layerId, featureId, feature) {
-  return request(`api/datasets/${layerId}/features/${featureId}`, {
+  return request(`api/layers/${layerId}/features/${featureId}`, {
     method: 'PUT',
     headers: { ...authHeaders() },
     body: JSON.stringify(feature)
@@ -159,9 +165,151 @@ export function updateFeature(layerId, featureId, feature) {
 }
 
 export function deleteFeature(layerId, featureId) {
-  return request(`api/datasets/${layerId}/features/${featureId}`, {
+  return request(`api/layers/${layerId}/features/${featureId}`, {
     method: 'DELETE',
     headers: { ...authHeaders() }
+  });
+}
+
+// Advanced Geometry Operations
+export function bufferAnalysis(datasetId, features, distance, unit = 'kilometers') {
+  return request(`api/datasets/${datasetId}/analysis/buffer`, {
+    method: 'POST',
+    headers: { ...authHeaders() },
+    body: JSON.stringify({ features, distance, unit })
+  });
+}
+
+export function unionFeatures(datasetId, features) {
+  return request(`api/datasets/${datasetId}/geometry/union`, {
+    method: 'POST',
+    headers: { ...authHeaders() },
+    body: JSON.stringify({ features })
+  });
+}
+
+export function intersectFeatures(datasetId1, datasetId2, features1, features2) {
+  return request('api/datasets/geometry/intersect', {
+    method: 'POST',
+    headers: { ...authHeaders() },
+    body: JSON.stringify({ datasetId1, datasetId2, features1, features2 })
+  });
+}
+
+export function clipFeatures(datasetId, boundaryDatasetId, features, boundary) {
+  return request('api/datasets/geometry/clip', {
+    method: 'POST',
+    headers: { ...authHeaders() },
+    body: JSON.stringify({ datasetId, boundaryDatasetId, features, boundary })
+  });
+}
+
+export function dissolveFeatures(datasetId, features, attribute) {
+  return request(`api/datasets/${datasetId}/geometry/dissolve`, {
+    method: 'POST',
+    headers: { ...authHeaders() },
+    body: JSON.stringify({ features, attribute })
+  });
+}
+
+// Raster API functions
+export function getRasterStatistics(datasetId) {
+  return request(`api/raster/datasets/${datasetId}/statistics`, {
+    headers: { ...authHeaders() }
+  });
+}
+
+export function getRasterHistogram(datasetId, band = 0, bins = 256) {
+  return request(`api/raster/datasets/${datasetId}/histogram?band=${band}&bins=${bins}`, {
+    headers: { ...authHeaders() }
+  });
+}
+
+export function getRasterMetadata(datasetId) {
+  return request(`api/raster/datasets/${datasetId}/metadata`, {
+    headers: { ...authHeaders() }
+  });
+}
+
+export function getColorRamps() {
+  return request('api/raster/color-ramps', {
+    headers: { ...authHeaders() }
+  });
+}
+
+export function generateColorRamp(colorRamp, steps = 256) {
+  return request('api/raster/color-ramps', {
+    method: 'POST',
+    headers: { ...authHeaders() },
+    body: JSON.stringify({ colorRamp, steps })
+  });
+}
+
+export function getStretchTypes() {
+  return request('api/raster/stretch-types', {
+    headers: { ...authHeaders() }
+  });
+}
+
+export function updateRasterStyling(layerId, rasterStyle) {
+  return request(`api/raster/layers/${layerId}/styling`, {
+    method: 'PUT',
+    headers: { ...authHeaders() },
+    body: JSON.stringify({ raster: rasterStyle })
+  });
+}
+
+export function getRasterTileUrl(datasetId, z, x, y, options = {}) {
+  const token = localStorage.getItem('authToken');
+  const params = new URLSearchParams({
+    colorRamp: options.colorRamp || 'viridis',
+    stretchType: options.stretchType || 'linear',
+    opacity: options.opacity || 1.0,
+    bands: options.bands ? options.bands.join(',') : '0,1,2',
+    ...(options.minValue && { minValue: options.minValue }),
+    ...(options.maxValue && { maxValue: options.maxValue }),
+    blendingMode: options.blendingMode || 'normal',
+    ...(token && { token: token }) // Add token as query parameter
+  });
+  
+  const url = `${API_BASE}/api/raster/datasets/${datasetId}/tiles/${z}/${x}/${y}?${params}`;
+  console.log('Generated raster tile URL:', url);
+  return url;
+}
+
+// Advanced Query API functions
+
+// Get dataset field information for query builder
+export function getDatasetFields(datasetId) {
+  return request(`api/datasets/${datasetId}/fields`, {
+    headers: { ...authHeaders() }
+  });
+}
+
+// Advanced attribute filter with multi-criteria
+export function advancedAttributeFilter(datasetId, criteria) {
+  return request(`api/datasets/${datasetId}/query/advanced-attribute`, {
+    method: 'POST',
+    headers: { ...authHeaders() },
+    body: JSON.stringify({ criteria })
+  });
+}
+
+// Spatial query with multiple criteria
+export function spatialQuery(datasetId, spatialCriteria) {
+  return request(`api/datasets/${datasetId}/query/spatial`, {
+    method: 'POST',
+    headers: { ...authHeaders() },
+    body: JSON.stringify({ spatialCriteria })
+  });
+}
+
+// Combined query (spatial + attribute)
+export function combinedQuery(datasetId, queryCriteria) {
+  return request(`api/datasets/${datasetId}/query/combined`, {
+    method: 'POST',
+    headers: { ...authHeaders() },
+    body: JSON.stringify({ queryCriteria })
   });
 }
 

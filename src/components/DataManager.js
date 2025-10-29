@@ -34,7 +34,9 @@ import {
   AccordionDetails,
   Divider,
   Tooltip,
-  Badge
+  Badge,
+  CircularProgress,
+  Skeleton
 } from '@mui/material';
 import {
   Upload as UploadIcon,
@@ -71,6 +73,7 @@ const DataManager = () => {
   const fileInputRef = useRef(null);
 
   const [datasets, setDatasets] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   const [supportedFormats] = useState([
     { name: 'Shapefile', extensions: ['.shp', '.shx', '.dbf', '.prj'], icon: <MapIcon />, color: '#1976d2' },
@@ -114,9 +117,24 @@ const DataManager = () => {
   useEffect(() => {
     (async () => {
       try {
+        setIsLoading(true);
         const resp = await listDatasets();
-        setDatasets(resp?.data || resp?.data?.data || []);
-      } catch (_) {}
+        console.log('Datasets API response:', resp);
+        const datasetsArray = resp?.data?.datasets || resp?.data || [];
+        console.log('Datasets array:', datasetsArray);
+        console.log('First dataset structure:', datasetsArray[0]);
+        setDatasets(datasetsArray);
+      } catch (error) {
+        console.error('Error fetching datasets:', error);
+        setDatasets([]);
+        setSnackbar({
+          open: true,
+          message: 'Failed to fetch datasets',
+          severity: 'error'
+        });
+      } finally {
+        setIsLoading(false);
+      }
     })();
   }, []);
 
@@ -124,22 +142,75 @@ const DataManager = () => {
     const files = Array.from(event.target.files);
     if (files.length === 0) return;
 
+    // Check for duplicates
+    const duplicates = [];
+    const newFiles = [];
+    
+    files.forEach(file => {
+      const isDuplicate = datasets.some(dataset => 
+        (dataset.originalFileName || dataset.name) === file.name
+      );
+      if (isDuplicate) {
+        duplicates.push(file.name);
+      } else {
+        newFiles.push(file);
+      }
+    });
+
+    if (duplicates.length > 0) {
+      setSnackbar({ 
+        open: true, 
+        message: `Skipped ${duplicates.length} duplicate files: ${duplicates.join(', ')}`, 
+        severity: 'warning' 
+      });
+    }
+
+    if (newFiles.length === 0) {
+      setSnackbar({ 
+        open: true, 
+        message: 'All files are duplicates. Use "Cleanup Duplicates" to remove old versions first.', 
+        severity: 'info' 
+      });
+      return;
+    }
+
     setIsUploading(true);
     setUploadProgress(0);
+    
+    let successCount = 0;
+    let errorCount = 0;
 
-    for (const file of files) {
+    for (const file of newFiles) {
       try {
         await uploadDataset(file);
-        setUploadProgress((p) => Math.min(100, p + Math.ceil(100 / files.length)));
+        successCount++;
+        setUploadProgress((p) => Math.min(100, p + Math.ceil(100 / newFiles.length)));
       } catch (e) {
-        setSnackbar({ open: true, message: e?.message || 'Upload failed', severity: 'error' });
+        errorCount++;
+        console.error('Upload error for file:', file.name, e);
+        setSnackbar({ open: true, message: `Upload failed for ${file.name}: ${e?.message || 'Unknown error'}`, severity: 'error' });
       }
     }
-    try {
-      const resp = await listDatasets();
-      setDatasets(resp?.data || resp?.data?.data || []);
-      setSnackbar({ open: true, message: 'Files uploaded successfully', severity: 'success' });
-    } catch (_) {}
+    
+    // Only refresh datasets and show success if at least one file uploaded successfully
+    if (successCount > 0) {
+      try {
+        const resp = await listDatasets();
+        setDatasets(resp?.data?.datasets || resp?.data || []);
+      } catch (error) {
+        console.error('Error refreshing datasets after upload:', error);
+      }
+    }
+    
+    // Show appropriate message based on results
+    if (successCount > 0 && errorCount === 0) {
+      setSnackbar({ open: true, message: `${successCount} file(s) uploaded successfully`, severity: 'success' });
+    } else if (successCount > 0 && errorCount > 0) {
+      setSnackbar({ open: true, message: `${successCount} file(s) uploaded, ${errorCount} failed`, severity: 'warning' });
+    } else if (errorCount > 0) {
+      setSnackbar({ open: true, message: `All ${errorCount} file(s) failed to upload`, severity: 'error' });
+    }
+    
     setIsUploading(false);
   };
 
@@ -241,49 +312,160 @@ const DataManager = () => {
     }, 2000);
   };
 
-  const handleDelete = (datasetId) => {
-    setDatasets(prev => prev.filter(dataset => dataset.id !== datasetId));
-    setSnackbar({ open: true, message: 'Dataset deleted successfully', severity: 'success' });
+  const handleDelete = async (datasetId) => {
+    console.log('Attempting to delete dataset with ID:', datasetId);
+    try {
+      // Make API call to delete from backend
+      const response = await fetch(`http://localhost:5000/api/datasets/${datasetId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete dataset');
+      }
+
+      // Remove from local state only after successful backend deletion
+      setDatasets(prev => prev.filter(dataset => (dataset._id || dataset.id) !== datasetId));
+      setSnackbar({ open: true, message: 'Dataset deleted successfully', severity: 'success' });
+    } catch (error) {
+      console.error('Error deleting dataset:', error);
+      setSnackbar({ open: true, message: 'Failed to delete dataset', severity: 'error' });
+    }
   };
 
   const handleReprocess = (datasetId) => {
     setDatasets(prev => prev.map(dataset => 
-      dataset.id === datasetId ? { ...dataset, status: 'processing' } : dataset
+      (dataset._id || dataset.id) === datasetId ? { ...dataset, status: 'processing' } : dataset
     ));
     setSnackbar({ open: true, message: 'Reprocessing dataset...', severity: 'info' });
     
     // Simulate reprocessing
     setTimeout(() => {
       setDatasets(prev => prev.map(dataset => 
-        dataset.id === datasetId ? { ...dataset, status: 'processed' } : dataset
+        (dataset._id || dataset.id) === datasetId ? { ...dataset, status: 'processed' } : dataset
       ));
       setSnackbar({ open: true, message: 'Dataset reprocessed successfully', severity: 'success' });
     }, 3000);
   };
 
+  const handleCleanupDuplicates = async () => {
+    try {
+      // Group datasets by filename
+      const grouped = datasets.reduce((acc, dataset) => {
+        const key = dataset.originalFileName || dataset.name;
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(dataset);
+        return acc;
+      }, {});
+
+      // Find duplicates (keep the most recent one)
+      const duplicates = [];
+      Object.values(grouped).forEach(group => {
+        if (group.length > 1) {
+          // Sort by upload date, keep the most recent
+          const sorted = group.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
+          duplicates.push(...sorted.slice(1)); // All except the first (most recent)
+        }
+      });
+
+      // Delete duplicates
+      for (const duplicate of duplicates) {
+        await handleDelete(duplicate._id || duplicate.id);
+      }
+
+      setSnackbar({ 
+        open: true, 
+        message: `Cleaned up ${duplicates.length} duplicate datasets`, 
+        severity: 'success' 
+      });
+    } catch (error) {
+      console.error('Error cleaning up duplicates:', error);
+      setSnackbar({ open: true, message: 'Failed to cleanup duplicates', severity: 'error' });
+    }
+  };
+
+  const handleRefresh = async () => {
+    try {
+      setIsLoading(true);
+      const resp = await listDatasets();
+      const datasetsArray = resp?.data?.datasets || resp?.data || [];
+      setDatasets(datasetsArray);
+      setSnackbar({ open: true, message: 'Data refreshed successfully', severity: 'success' });
+    } catch (error) {
+      console.error('Error refreshing datasets:', error);
+      setSnackbar({ open: true, message: 'Failed to refresh data', severity: 'error' });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <Box sx={{ p: 3 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4">
-          Data Manager
-        </Typography>
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <Button
-            variant="contained"
-            startIcon={<CloudUploadIcon />}
-            onClick={() => fileInputRef.current?.click()}
-            sx={{ bgcolor: '#00bcd4' }}
-          >
-            Upload Data
-          </Button>
-          <Button
-            variant="outlined"
-            startIcon={<CloudDownloadIcon />}
-            sx={{ borderColor: '#00bcd4', color: '#00bcd4' }}
-          >
-            Bulk Download
-          </Button>
+      {/* Loading Spinner */}
+      {isLoading && (
+        <Box sx={{ 
+          display: 'flex', 
+          flexDirection: 'column', 
+          alignItems: 'center', 
+          justifyContent: 'center', 
+          minHeight: '400px',
+          gap: 2
+        }}>
+          <CircularProgress size={60} sx={{ color: '#00bcd4' }} />
+          <Typography variant="h6" color="textSecondary">
+            Loading datasets...
+          </Typography>
         </Box>
+      )}
+
+      {/* Main Content - Only show when not loading */}
+      {!isLoading && (
+        <>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+            <Typography variant="h4">
+              Data Manager
+            </Typography>
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Button
+                variant="contained"
+                startIcon={<CloudUploadIcon />}
+                onClick={() => fileInputRef.current?.click()}
+                sx={{ bgcolor: '#00bcd4' }}
+                disabled={isLoading}
+              >
+                Upload Data
+              </Button>
+              <Button
+                variant="outlined"
+                startIcon={<RefreshIcon />}
+                onClick={handleRefresh}
+                sx={{ borderColor: '#00bcd4', color: '#00bcd4' }}
+                disabled={isLoading}
+              >
+                Refresh
+              </Button>
+              <Button
+                variant="outlined"
+                startIcon={<CloudDownloadIcon />}
+                sx={{ borderColor: '#00bcd4', color: '#00bcd4' }}
+                disabled={isLoading}
+              >
+                Bulk Download
+              </Button>
+              <Button
+                variant="outlined"
+                startIcon={<DeleteIcon />}
+                onClick={handleCleanupDuplicates}
+                sx={{ borderColor: '#ff5722', color: '#ff5722' }}
+                disabled={isLoading}
+              >
+                Cleanup Duplicates
+              </Button>
+            </Box>
       </Box>
 
       {/* Hidden file input */}
@@ -413,12 +595,12 @@ const DataManager = () => {
                       </IconButton>
                     </Tooltip>
                     <Tooltip title="Reprocess">
-                      <IconButton onClick={() => handleReprocess(dataset.id)}>
+                      <IconButton onClick={() => handleReprocess(dataset._id || dataset.id)}>
                         <RefreshIcon />
                       </IconButton>
                     </Tooltip>
                     <Tooltip title="Delete">
-                      <IconButton onClick={() => handleDelete(dataset.id)} color="error">
+                      <IconButton onClick={() => handleDelete(dataset._id || dataset.id)} color="error">
                         <DeleteIcon />
                       </IconButton>
                     </Tooltip>
@@ -478,7 +660,7 @@ const DataManager = () => {
                     Total Features
                   </Typography>
                   <Typography variant="h5">
-                    {datasets.reduce((sum, d) => sum + d.features, 0).toLocaleString()}
+                    {datasets.reduce((sum, d) => sum + (d.featureCount || 0), 0).toLocaleString()}
                   </Typography>
                 </Box>
               </Box>
@@ -496,7 +678,7 @@ const DataManager = () => {
                     Total Layers
                   </Typography>
                   <Typography variant="h5">
-                    {datasets.reduce((sum, d) => sum + d.layers, 0)}
+                    {datasets.filter(d => d.status === 'ready').length}
                   </Typography>
                 </Box>
               </Box>
@@ -504,6 +686,82 @@ const DataManager = () => {
           </Card>
         </Grid>
       </Grid>
+
+      {/* Feature Details Section */}
+      {datasets.length > 0 && (
+        <Paper sx={{ mt: 3, p: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            Dataset Features Overview
+          </Typography>
+          <Grid container spacing={2}>
+            {datasets.map((dataset) => (
+              <Grid item xs={12} md={6} key={dataset._id}>
+                <Card variant="outlined">
+                  <CardContent>
+                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                      {getFormatIcon(dataset.type)}
+                      <Typography variant="h6" sx={{ ml: 1 }}>
+                        {dataset.name}
+                      </Typography>
+                      <Chip 
+                        label={dataset.status} 
+                        color={getStatusColor(dataset.status)}
+                        size="small"
+                        sx={{ ml: 'auto' }}
+                      />
+                    </Box>
+                    
+                    <Typography variant="body2" color="textSecondary" gutterBottom>
+                      Type: {dataset.type} • Features: {dataset.featureCount || 0}
+                      {dataset.totalFeatures && dataset.totalFeatures > (dataset.featureCount || 0) && 
+                        ` (${dataset.totalFeatures} total)`
+                      }
+                    </Typography>
+                    
+                    {dataset.features && dataset.features.length > 0 && (
+                      <Box sx={{ mt: 2 }}>
+                        <Typography variant="subtitle2" gutterBottom>
+                          Sample Features:
+                        </Typography>
+                        <Box sx={{ maxHeight: 200, overflow: 'auto' }}>
+                          {dataset.features.slice(0, 5).map((feature, index) => (
+                            <Box key={index} sx={{ mb: 1, p: 1, bgcolor: 'grey.50', borderRadius: 1 }}>
+                              <Typography variant="caption" display="block">
+                                <strong>Type:</strong> {feature.type}
+                              </Typography>
+                              <Typography variant="caption" display="block">
+                                <strong>Geometry:</strong> {feature.geometry?.type}
+                              </Typography>
+                              {feature.properties && Object.keys(feature.properties).length > 0 && (
+                                <Typography variant="caption" display="block">
+                                  <strong>Properties:</strong> {Object.keys(feature.properties).join(', ')}
+                                </Typography>
+                              )}
+                            </Box>
+                          ))}
+                          {dataset.features.length > 5 && (
+                            <Typography variant="caption" color="textSecondary">
+                              ... and {dataset.features.length - 5} more features
+                            </Typography>
+                          )}
+                        </Box>
+                      </Box>
+                    )}
+                    
+                    {dataset.isLargeFile && (
+                      <Alert severity="info" sx={{ mt: 2 }}>
+                        Large file: Only first {dataset.featureCount || 0} features processed
+                      </Alert>
+                    )}
+                  </CardContent>
+                </Card>
+              </Grid>
+            ))}
+          </Grid>
+        </Paper>
+      )}
+        </>
+      )}
 
       {/* Snackbar for notifications */}
       <Snackbar
