@@ -74,6 +74,7 @@ const DataManager = () => {
 
   const [datasets, setDatasets] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [deletingIds, setDeletingIds] = useState(new Set());
 
   const [supportedFormats] = useState([
     { name: 'Shapefile', extensions: ['.shp', '.shx', '.dbf', '.prj'], icon: <MapIcon />, color: '#1976d2' },
@@ -315,6 +316,7 @@ const DataManager = () => {
   const handleDelete = async (datasetId) => {
     console.log('Attempting to delete dataset with ID:', datasetId);
     try {
+      setDeletingIds(prev => new Set(prev).add(datasetId));
       // Make API call to delete from backend
       const response = await fetch(`http://localhost:5000/api/datasets/${datasetId}`, {
         method: 'DELETE',
@@ -334,6 +336,12 @@ const DataManager = () => {
     } catch (error) {
       console.error('Error deleting dataset:', error);
       setSnackbar({ open: true, message: 'Failed to delete dataset', severity: 'error' });
+    } finally {
+      setDeletingIds(prev => {
+        const next = new Set(prev);
+        next.delete(datasetId);
+        return next;
+      });
     }
   };
 
@@ -599,10 +607,20 @@ const DataManager = () => {
                         <RefreshIcon />
                       </IconButton>
                     </Tooltip>
-                    <Tooltip title="Delete">
-                      <IconButton onClick={() => handleDelete(dataset._id || dataset.id)} color="error">
-                        <DeleteIcon />
-                      </IconButton>
+                    <Tooltip title={deletingIds.has(dataset._id || dataset.id) ? "Deleting..." : "Delete"}>
+                      <span>
+                        <IconButton 
+                          onClick={() => handleDelete(dataset._id || dataset.id)} 
+                          color="error"
+                          disabled={deletingIds.has(dataset._id || dataset.id)}
+                        >
+                          {deletingIds.has(dataset._id || dataset.id) ? (
+                            <CircularProgress size={20} />
+                          ) : (
+                            <DeleteIcon />
+                          )}
+                        </IconButton>
+                      </span>
                     </Tooltip>
                   </Box>
                 </ListItemSecondaryAction>

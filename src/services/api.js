@@ -261,6 +261,14 @@ export function updateRasterStyling(layerId, rasterStyle) {
 
 export function getRasterTileUrl(datasetId, z, x, y, options = {}) {
   const token = localStorage.getItem('authToken');
+  
+  // Create a style hash for consistent caching (same style = same hash)
+  const styleString = `${options.colorRamp || 'viridis'}-${options.stretchType || 'linear'}-${options.opacity || 1.0}-${options.bands?.join(',') || '0,1,2'}-${options.minValue || ''}-${options.maxValue || ''}-${options.blendingMode || 'normal'}`;
+  const styleHash = styleString.split('').reduce((a, b) => {
+    a = ((a << 5) - a) + b.charCodeAt(0);
+    return a & a;
+  }, 0);
+  
   const params = new URLSearchParams({
     colorRamp: options.colorRamp || 'viridis',
     stretchType: options.stretchType || 'linear',
@@ -269,6 +277,7 @@ export function getRasterTileUrl(datasetId, z, x, y, options = {}) {
     ...(options.minValue && { minValue: options.minValue }),
     ...(options.maxValue && { maxValue: options.maxValue }),
     blendingMode: options.blendingMode || 'normal',
+    _v: Math.abs(styleHash).toString(36), // Style version hash for cache-busting when style changes
     ...(token && { token: token }) // Add token as query parameter
   });
   
@@ -310,6 +319,52 @@ export function combinedQuery(datasetId, queryCriteria) {
     method: 'POST',
     headers: { ...authHeaders() },
     body: JSON.stringify({ queryCriteria })
+  });
+}
+
+// Terrain Analysis API functions
+export function calculateSlope(datasetId, unit = 'degrees') {
+  return request(`api/terrain/datasets/${datasetId}/slope`, {
+    method: 'POST',
+    headers: { ...authHeaders() },
+    body: JSON.stringify({ unit })
+  });
+}
+
+export function calculateAspect(datasetId) {
+  return request(`api/terrain/datasets/${datasetId}/aspect`, {
+    method: 'POST',
+    headers: { ...authHeaders() }
+  });
+}
+
+export function generateHillshade(datasetId, azimuth = 315, altitude = 45) {
+  return request(`api/terrain/datasets/${datasetId}/hillshade`, {
+    method: 'POST',
+    headers: { ...authHeaders() },
+    body: JSON.stringify({ azimuth, altitude })
+  });
+}
+
+export function generateContours(datasetId, interval = 10) {
+  return request(`api/terrain/datasets/${datasetId}/contours`, {
+    method: 'POST',
+    headers: { ...authHeaders() },
+    body: JSON.stringify({ interval })
+  });
+}
+
+export function calculateWatershed(datasetId, pourPoint) {
+  return request(`api/terrain/datasets/${datasetId}/watershed`, {
+    method: 'POST',
+    headers: { ...authHeaders() },
+    body: JSON.stringify({ pourPoint })
+  });
+}
+
+export function getTerrainAnalyses(datasetId) {
+  return request(`api/terrain/datasets/${datasetId}/analyses`, {
+    headers: { ...authHeaders() }
   });
 }
 

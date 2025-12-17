@@ -54,8 +54,9 @@ import {
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './MapView.css';
-import { listLayers, getLayerFeatures, queryLayerAttribute, queryLayerBuffer, queryPointInPolygon, createFeature, updateFeature, deleteFeature, getRasterTileUrl, updateRasterStyling } from '../services/api';
+import { listLayers, getLayerFeatures, queryLayerAttribute, queryLayerBuffer, queryPointInPolygon, createFeature, updateFeature, deleteFeature, getRasterTileUrl, updateRasterStyling, listDatasets } from '../services/api';
 import RasterStylePanel from './RasterStylePanel';
+import TerrainAnalysisPanel from './TerrainAnalysisPanel';
 
 // Fix for default markers in react-leaflet
 delete L.Icon.Default.prototype._getIconUrl;
@@ -192,6 +193,7 @@ const MapView = () => {
   const [editingMode, setEditingMode] = useState(false);
   const [selectedFeature, setSelectedFeature] = useState(null);
   const [rasterStylePanel, setRasterStylePanel] = useState({ open: false, layer: null });
+  const [terrainAnalysisPanel, setTerrainAnalysisPanel] = useState({ open: false, dataset: null });
 
   const handleRasterStyleUpdate = async (style) => {
     if (!rasterStylePanel.layer) return;
@@ -200,14 +202,42 @@ const MapView = () => {
     console.log('Layer:', rasterStylePanel.layer);
     
     try {
-      await updateRasterStyling(rasterStylePanel.layer._id, style);
-      // Update the layer in the serverLayers state
-      setServerLayers(prev => prev.map(layer => 
-        layer._id === rasterStylePanel.layer._id 
-          ? { ...layer, style: { ...layer.style, raster: style } }
-          : layer
-      ));
-      console.log('Raster style updated successfully');
+      const response = await updateRasterStyling(rasterStylePanel.layer._id, style);
+      console.log('Style update response:', response);
+      
+      // Only update the specific raster layer's style, preserve other layers' state
+      setServerLayers(prev => {
+        const updatedLayers = prev.map(layer => {
+          if (layer._id === rasterStylePanel.layer._id) {
+            // Update only the raster layer with new style
+            const updatedLayer = {
+              ...layer,
+              style: {
+                ...layer.style,
+                raster: style
+              },
+              _styleUpdate: Date.now() // Force re-render
+            };
+            // Update the raster style panel layer reference
+            setRasterStylePanel({ open: true, layer: updatedLayer });
+            return updatedLayer;
+          }
+          // Preserve all other layers (including vector layers) as-is
+          return layer;
+        });
+        return updatedLayers;
+      });
+      
+      console.log('Raster style updated successfully - tiles should refresh');
+      
+      // Force map to invalidate size and refresh tiles
+      if (mapRef.current) {
+        setTimeout(() => {
+          mapRef.current.invalidateSize();
+          // Force tile refresh by triggering a zoom event
+          mapRef.current.setZoom(mapRef.current.getZoom());
+        }, 200);
+      }
     } catch (error) {
       console.error('Error updating raster style:', error);
     }
@@ -219,6 +249,50 @@ const MapView = () => {
 
   const closeRasterStylePanel = () => {
     setRasterStylePanel({ open: false, layer: null });
+  };
+
+  const openTerrainAnalysisPanel = async (layer) => {
+    // Get the dataset from the layer
+    try {
+      const datasetsResp = await listDatasets();
+      const datasets = datasetsResp?.data?.datasets || [];
+      const dataset = datasets.find(d => 
+        (d._id || d.id) === (layer.source?.datasetId?._id || layer.source?.datasetId || layer.source?.datasetId?.id)
+      );
+      
+      if (dataset) {
+        setTerrainAnalysisPanel({ open: true, dataset });
+      } else {
+        console.error('Dataset not found for layer:', layer);
+      }
+    } catch (error) {
+      console.error('Error opening terrain analysis panel:', error);
+    }
+  };
+
+  const closeTerrainAnalysisPanel = () => {
+    setTerrainAnalysisPanel({ open: false, dataset: null });
+  };
+
+  const handleTerrainAnalysisComplete = async (result) => {
+    // Refresh layers after terrain analysis
+    try {
+      const resp = await listLayers();
+      const layers = resp?.data?.layers || resp?.data || [];
+      setServerLayers(layers.map(l => ({ ...l, visible: true })));
+      
+      // Preload features for new layers
+      for (const l of layers) {
+        if (l.type !== 'raster') {
+          try {
+            const fc = await getLayerFeatures(l._id, { limit: 1000 });
+            setServerLayerFeatures(prev => ({ ...prev, [l._id]: fc?.data || fc }));
+          } catch (_) {}
+        }
+      }
+    } catch (error) {
+      console.error('Error refreshing layers after terrain analysis:', error);
+    }
   };
 
   useEffect(() => {
@@ -529,15 +603,20 @@ const MapView = () => {
             
             console.log(`Rendering raster layer ${l.name} with style:`, styleOptions);
             
+            // Create a style hash for cache-busting and key uniqueness
+            const styleHash = JSON.stringify(styleOptions);
             const tileUrl = getRasterTileUrl(l.source.datasetId._id || l.source.datasetId, '{z}', '{x}', '{y}', styleOptions);
             
             return (
               <TileLayer
-                key={`raster-${l._id}`}
+                key={`raster-${l._id}-${styleHash}`}
                 url={tileUrl}
                 opacity={rasterStyle.opacity || 1.0}
                 zIndex={1000 + idx}
                 attribution={`Raster layer: ${l.name}`}
+                updateWhenZooming={false}
+                updateWhenIdle={true}
+                keepBuffer={2}
               />
             );
           })}
@@ -657,6 +736,20 @@ const MapView = () => {
                 />
               );
             }
+            if (f.geometry?.type === 'MultiLineString') {
+              const positions = f.geometry.coordinates.map(line => line.map(([lng, lat]) => [lat, lng]));
+              return (
+                <Polyline 
+                  key={`query-result-mln-${i}`} 
+                  positions={positions} 
+                  pathOptions={{ 
+                    color: highlightColor, 
+                    weight: highlightWeight,
+                    opacity: 0.8
+                  }} 
+                />
+              );
+            }
             if (f.geometry?.type === 'Polygon') {
               const positions = f.geometry.coordinates[0].map(([lng, lat]) => [lat, lng]);
               return (
@@ -671,6 +764,48 @@ const MapView = () => {
                   }} 
                 />
               );
+            }
+            if (f.geometry?.type === 'MultiPolygon') {
+              const positions = f.geometry.coordinates.map(poly => poly[0].map(([lng, lat]) => [lat, lng]));
+              return (
+                <Polygon 
+                  key={`query-result-mpg-${i}`} 
+                  positions={positions} 
+                  pathOptions={{ 
+                    color: highlightColor, 
+                    weight: highlightWeight, 
+                    fillOpacity: highlightFillOpacity,
+                    opacity: 0.8
+                  }} 
+                />
+              );
+            }
+            if (f.geometry?.type === 'GeometryCollection' && Array.isArray(f.geometry.geometries)) {
+              return f.geometry.geometries.map((g, gi) => {
+                const gf = { type: 'Feature', geometry: g, properties: f.properties };
+                const key = `query-result-gc-${i}-${gi}`;
+                if (g.type === 'Point') {
+                  const [lng, lat] = g.coordinates;
+                  return <Marker key={key} position={[lat, lng]} />;
+                }
+                if (g.type === 'LineString') {
+                  const positions = g.coordinates.map(([lng, lat]) => [lat, lng]);
+                  return <Polyline key={key} positions={positions} pathOptions={{ color: highlightColor, weight: highlightWeight, opacity: 0.8 }} />;
+                }
+                if (g.type === 'MultiLineString') {
+                  const positions = g.coordinates.map(line => line.map(([lng, lat]) => [lat, lng]));
+                  return <Polyline key={key} positions={positions} pathOptions={{ color: highlightColor, weight: highlightWeight, opacity: 0.8 }} />;
+                }
+                if (g.type === 'Polygon') {
+                  const positions = g.coordinates[0].map(([lng, lat]) => [lat, lng]);
+                  return <Polygon key={key} positions={positions} pathOptions={{ color: highlightColor, weight: highlightWeight, fillOpacity: highlightFillOpacity, opacity: 0.8 }} />;
+                }
+                if (g.type === 'MultiPolygon') {
+                  const positions = g.coordinates.map(poly => poly[0].map(([lng, lat]) => [lat, lng]));
+                  return <Polygon key={key} positions={positions} pathOptions={{ color: highlightColor, weight: highlightWeight, fillOpacity: highlightFillOpacity, opacity: 0.8 }} />;
+                }
+                return null;
+              });
             }
             return null;
           })}
@@ -808,43 +943,57 @@ const MapView = () => {
             position: 'absolute',
             top: 16,
             left: 16,
-            right: 16,
             zIndex: 1000,
-            p: 1,
+            p: 1.5,
             display: 'flex',
             alignItems: 'center',
             gap: 1,
-            background: 'rgba(0,0,0,0.8)',
-            backdropFilter: 'blur(10px)'
+            background: 'rgba(0,0,0,0.85)',
+            backdropFilter: 'blur(10px)',
+            borderRadius: 2,
+            minWidth: 400,
+            maxWidth: 600
           }}
         >
           <TextField
-            fullWidth
-            placeholder="Search locations or load KML data..."
+            placeholder="Search locations..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             size="small"
             sx={{ 
+              flex: 1,
               '& .MuiOutlinedInput-root': { 
                 color: 'white',
-                '& fieldset': { borderColor: 'rgba(255,255,255,0.3)' }
+                '& fieldset': { borderColor: 'rgba(255,255,255,0.3)' },
+                '&:hover fieldset': { borderColor: 'rgba(255,255,255,0.5)' }
               }
             }}
             InputProps={{
               startAdornment: (
                 <InputAdornment position="start">
-                  <SearchIcon sx={{ color: 'white' }} />
+                  <SearchIcon sx={{ color: 'rgba(255,255,255,0.7)' }} />
                 </InputAdornment>
               ),
+            }}
+            onKeyPress={(e) => {
+              if (e.key === 'Enter' && searchQuery.trim()) {
+                // Trigger search
+                e.target.blur();
+              }
             }}
           />
           <Button 
             variant="contained" 
             size="small" 
-            sx={{ bgcolor: '#00bcd4' }}
+            sx={{ 
+              bgcolor: '#00bcd4',
+              '&:hover': { bgcolor: '#00acc1' },
+              minWidth: 80
+            }}
             onClick={async () => {
               if (!searchQuery.trim()) return;
               try {
+                setSearchResults([]);
                 // Simple attribute search across all layers
                 for (const layer of serverLayers) {
                   try {
@@ -862,67 +1011,22 @@ const MapView = () => {
           >
             Search
           </Button>
-          
-          <Button 
-            variant="outlined" 
-            size="small" 
-            sx={{ 
-              borderColor: '#00bcd4', 
-              color: '#00bcd4',
-              '&:hover': { borderColor: '#00acc1', bgcolor: 'rgba(0,188,212,0.1)' }
-            }}
-            onClick={() => {
-              // This will be handled by the QueryPanel component
-              console.log('Advanced Query button clicked');
-            }}
-          >
-            <FilterIcon sx={{ mr: 1 }} />
-            Advanced Query
-          </Button>
-        </Paper>
-
-        {/* 3D Map Generator Section */}
-        <Paper
-          sx={{
-            position: 'absolute',
-            top: 80,
-            left: 16,
-            zIndex: 1000,
-            p: 2,
-            background: 'rgba(0,0,0,0.8)',
-            backdropFilter: 'blur(10px)',
-            color: 'white',
-            minWidth: 200
-          }}
-        >
-          <Typography variant="h6" gutterBottom>
-            3D Map Generator
-          </Typography>
-          <Button 
-            variant="outlined" 
-            size="small" 
-            sx={{ mb: 1, borderColor: '#00bcd4', color: '#00bcd4' }}
-          >
-            Token Free
-          </Button>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            Photorealistic Map - High-resolution satellite imagery with photorealistic detail.
-          </Typography>
         </Paper>
 
         {/* Map Controls */}
         <Paper
           sx={{
             position: 'absolute',
-            top: 80,
+            top: 16,
             right: 16,
             zIndex: 1000,
             p: 1,
             display: 'flex',
             flexDirection: 'column',
-            gap: 1,
-            background: 'rgba(0,0,0,0.8)',
-            backdropFilter: 'blur(10px)'
+            gap: 0.5,
+            background: 'rgba(0,0,0,0.85)',
+            backdropFilter: 'blur(10px)',
+            borderRadius: 2
           }}
         >
           <Tooltip title="Home">
@@ -1011,47 +1115,60 @@ const MapView = () => {
           </Tooltip>
         </Paper>
 
-        {/* Layer Switcher */}
+        {/* Layer Switcher - Compact */}
         <Paper
           sx={{
             position: 'absolute',
             bottom: 16,
             left: 16,
             zIndex: 1000,
-            p: 2,
-            background: 'rgba(0,0,0,0.8)',
+            p: 1.5,
+            background: 'rgba(0,0,0,0.85)',
             backdropFilter: 'blur(10px)',
-            minWidth: 200
+            borderRadius: 2,
+            minWidth: 180
           }}
         >
-          <Typography variant="subtitle2" sx={{ color: 'white', mb: 1 }}>
-            Base Layers
+          <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.7)', mb: 1, display: 'block', fontWeight: 500 }}>
+            Base Map
           </Typography>
           {mapLayers.map((layer) => (
-            <Box key={layer.name} sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-              <Box sx={{ mr: 1, color: 'white' }}>
-                {layer.name === 'Satellite' && <SatelliteIcon sx={{ fontSize: 16 }} />}
-                {layer.name === 'OpenStreetMap' && <MapIcon sx={{ fontSize: 16 }} />}
-                {layer.name === 'Terrain' && <TerrainIcon sx={{ fontSize: 16 }} />}
-                {layer.name === 'Hybrid' && <MapIcon sx={{ fontSize: 16 }} />}
-                {layer.name === 'Dark' && <MapIcon sx={{ fontSize: 16 }} />}
+            <Box 
+              key={layer.name} 
+              sx={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                mb: 0.5,
+                p: 0.5,
+                borderRadius: 1,
+                cursor: 'pointer',
+                '&:hover': { bgcolor: 'rgba(255,255,255,0.05)' }
+              }}
+              onClick={() => switchLayer(layer.name)}
+            >
+              <Box sx={{ mr: 1, color: 'rgba(255,255,255,0.8)' }}>
+                {layer.name === 'Satellite' && <SatelliteIcon sx={{ fontSize: 18 }} />}
+                {layer.name === 'OpenStreetMap' && <MapIcon sx={{ fontSize: 18 }} />}
+                {layer.name === 'Terrain' && <TerrainIcon sx={{ fontSize: 18 }} />}
+                {layer.name === 'Hybrid' && <MapIcon sx={{ fontSize: 18 }} />}
+                {layer.name === 'Dark' && <MapIcon sx={{ fontSize: 18 }} />}
               </Box>
               <Typography 
                 variant="body2" 
                 sx={{ 
-                  color: 'white', 
+                  color: layer.active ? 'white' : 'rgba(255,255,255,0.6)', 
                   flexGrow: 1,
-                  cursor: 'pointer'
+                  fontSize: '0.875rem',
+                  fontWeight: layer.active ? 500 : 400
                 }}
-              onClick={() => switchLayer(layer.name)}
               >
                 {layer.name}
               </Typography>
               <Switch
                 checked={layer.active}
                 onChange={() => switchLayer(layer.name)}
-              size="small"
-              sx={{ 
+                size="small"
+                sx={{ 
                   '& .MuiSwitch-switchBase.Mui-checked': {
                     color: '#00bcd4',
                   },
@@ -1435,8 +1552,17 @@ const MapView = () => {
                           size="small" 
                           onClick={() => openRasterStylePanel(l)}
                           sx={{ color: 'white' }}
+                          title="Style Settings"
                         >
                           <SettingsIcon />
+                        </IconButton>
+                        <IconButton 
+                          size="small" 
+                          onClick={() => openTerrainAnalysisPanel(l)}
+                          sx={{ color: 'white' }}
+                          title="Terrain Analysis"
+                        >
+                          <AnalyticsIcon />
                         </IconButton>
                       </Box>
                     </ListItem>
@@ -1743,6 +1869,24 @@ const MapView = () => {
             layer={rasterStylePanel.layer}
             onStyleUpdate={handleRasterStyleUpdate}
             onClose={closeRasterStylePanel}
+          />
+        </Box>
+      )}
+
+      {/* Terrain Analysis Panel */}
+      {terrainAnalysisPanel.open && (
+        <Box
+          sx={{
+            position: 'absolute',
+            top: 20,
+            right: 20,
+            zIndex: 2000
+          }}
+        >
+          <TerrainAnalysisPanel
+            dataset={terrainAnalysisPanel.dataset}
+            onClose={closeTerrainAnalysisPanel}
+            onAnalysisComplete={handleTerrainAnalysisComplete}
           />
         </Box>
       )}
