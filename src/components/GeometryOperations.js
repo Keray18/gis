@@ -53,7 +53,8 @@ import {
   intersectFeatures,
   clipFeatures,
   dissolveFeatures,
-  listDatasets
+  listDatasets,
+  saveClipping
 } from '../services/api';
 
 const GeometryOperations = ({ selectedLayers, onResultsUpdate, onResultVisibilityChange, onResultDelete }) => {
@@ -65,6 +66,11 @@ const GeometryOperations = ({ selectedLayers, onResultsUpdate, onResultVisibilit
   const [selectedFeatures, setSelectedFeatures] = useState([]);
   const [operationParams, setOperationParams] = useState({});
   const [showResults, setShowResults] = useState(false);
+  const [savingClipping, setSavingClipping] = useState(false);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [clippingToSave, setClippingToSave] = useState(null);
+  const [clippingName, setClippingName] = useState('');
+  const [clippingDescription, setClippingDescription] = useState('');
 
   // Operation configurations
   const operations = {
@@ -244,6 +250,64 @@ const GeometryOperations = ({ selectedLayers, onResultsUpdate, onResultVisibilit
     // Notify parent component about deletion
     if (onResultDelete) {
       onResultDelete(resultId);
+    }
+  };
+
+  const handleSaveClipping = (result) => {
+    if (result.operation !== 'clip') return;
+    
+    const dataset = datasets.find(d => d._id === selectedDataset);
+    const boundaryDataset = datasets.find(d => d._id === operationParams.boundaryDataset);
+    
+    if (!dataset || !boundaryDataset) {
+      alert('Source or boundary dataset not found');
+      return;
+    }
+
+    setClippingToSave({
+      result,
+      sourceDatasetId: selectedDataset,
+      boundaryDatasetId: operationParams.boundaryDataset,
+      sourceDatasetName: dataset.name,
+      boundaryDatasetName: boundaryDataset.name
+    });
+    setClippingName(`${dataset.name} - Clipped by ${boundaryDataset.name}`);
+    setSaveDialogOpen(true);
+  };
+
+  const handleConfirmSaveClipping = async () => {
+    if (!clippingName.trim()) {
+      alert('Please enter a name for the clipping');
+      return;
+    }
+
+    setSavingClipping(true);
+    try {
+      const clippingData = {
+        name: clippingName,
+        description: clippingDescription,
+        sourceDatasetId: clippingToSave.sourceDatasetId,
+        boundaryDatasetId: clippingToSave.boundaryDatasetId,
+        features: clippingToSave.result.features,
+        clipParameters: clippingToSave.result.parameters
+      };
+
+      const response = await saveClipping(clippingData);
+      
+      if (response.success) {
+        alert('Clipping saved successfully!');
+        setSaveDialogOpen(false);
+        setClippingToSave(null);
+        setClippingName('');
+        setClippingDescription('');
+      } else {
+        alert(`Failed to save clipping: ${response.message || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error saving clipping:', error);
+      alert(`Failed to save clipping: ${error.message}`);
+    } finally {
+      setSavingClipping(false);
     }
   };
 
@@ -434,6 +498,17 @@ const GeometryOperations = ({ selectedLayers, onResultsUpdate, onResultVisibilit
                 />
                 <ListItemSecondaryAction>
                   <Box sx={{ display: 'flex', gap: 1 }}>
+                    {result.operation === 'clip' && (
+                      <Tooltip title="Save as Clipping">
+                        <IconButton
+                          size="small"
+                          onClick={() => handleSaveClipping(result)}
+                          sx={{ color: '#4caf50' }}
+                        >
+                          <SaveIcon />
+                        </IconButton>
+                      </Tooltip>
+                    )}
                     <Tooltip title={result.visible ? "Hide" : "Show"}>
                       <IconButton
                         size="small"
@@ -467,6 +542,85 @@ const GeometryOperations = ({ selectedLayers, onResultsUpdate, onResultVisibilit
           or leave unselected to process all features in the dataset.
         </Typography>
       </Alert>
+
+      {/* Save Clipping Dialog */}
+      <Dialog 
+        open={saveDialogOpen} 
+        onClose={() => setSaveDialogOpen(false)}
+        PaperProps={{
+          sx: {
+            bgcolor: '#1e1e1e',
+            color: 'white'
+          }
+        }}
+      >
+        <DialogTitle sx={{ color: 'white' }}>Save as Clipping</DialogTitle>
+        <DialogContent>
+          <Box sx={{ mt: 2, minWidth: 400 }}>
+            <TextField
+              fullWidth
+              label="Clipping Name"
+              value={clippingName}
+              onChange={(e) => setClippingName(e.target.value)}
+              required
+              margin="normal"
+              sx={{
+                '& .MuiInputLabel-root': { color: 'rgba(255,255,255,0.7)' },
+                '& .MuiInputBase-input': { color: 'white' },
+                '& .MuiOutlinedInput-root': {
+                  '& fieldset': { borderColor: 'rgba(255,255,255,0.3)' }
+                }
+              }}
+            />
+            <TextField
+              fullWidth
+              label="Description (optional)"
+              value={clippingDescription}
+              onChange={(e) => setClippingDescription(e.target.value)}
+              margin="normal"
+              multiline
+              rows={3}
+              sx={{
+                '& .MuiInputLabel-root': { color: 'rgba(255,255,255,0.7)' },
+                '& .MuiInputBase-input': { color: 'white' },
+                '& .MuiOutlinedInput-root': {
+                  '& fieldset': { borderColor: 'rgba(255,255,255,0.3)' }
+                }
+              }}
+            />
+            {clippingToSave && (
+              <Box sx={{ mt: 2, p: 2, bgcolor: 'rgba(255,255,255,0.05)', borderRadius: 1 }}>
+                <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.7)' }}>
+                  <strong>Source:</strong> {clippingToSave.sourceDatasetName}<br />
+                  <strong>Boundary:</strong> {clippingToSave.boundaryDatasetName}<br />
+                  <strong>Features:</strong> {clippingToSave.result.count}
+                </Typography>
+              </Box>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button 
+            onClick={() => {
+              setSaveDialogOpen(false);
+              setClippingToSave(null);
+              setClippingName('');
+              setClippingDescription('');
+            }}
+            sx={{ color: 'rgba(255,255,255,0.7)' }}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleConfirmSaveClipping}
+            variant="contained"
+            disabled={savingClipping || !clippingName.trim()}
+            sx={{ bgcolor: '#00bcd4' }}
+          >
+            {savingClipping ? 'Saving...' : 'Save Clipping'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

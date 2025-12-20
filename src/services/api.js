@@ -368,6 +368,73 @@ export function getTerrainAnalyses(datasetId) {
   });
 }
 
+// Clipping API functions
+export function saveClipping(clippingData) {
+  return request('api/clippings', {
+    method: 'POST',
+    headers: { ...authHeaders() },
+    body: JSON.stringify(clippingData)
+  });
+}
+
+export function listClippings(params = {}) {
+  const queryParams = new URLSearchParams();
+  if (params.projectId) queryParams.append('projectId', params.projectId);
+  if (params.sourceDatasetId) queryParams.append('sourceDatasetId', params.sourceDatasetId);
+  if (params.boundaryDatasetId) queryParams.append('boundaryDatasetId', params.boundaryDatasetId);
+  if (params.search) queryParams.append('search', params.search);
+  
+  const queryString = queryParams.toString();
+  return request(`api/clippings${queryString ? `?${queryString}` : ''}`, {
+    headers: { ...authHeaders() }
+  });
+}
+
+export function getClipping(clippingId) {
+  return request(`api/clippings/${clippingId}`, {
+    headers: { ...authHeaders() }
+  });
+}
+
+export function getClippingFeatures(clippingId, { limit, offset } = {}) {
+  const params = new URLSearchParams();
+  if (limit) params.append('limit', limit);
+  if (offset) params.append('offset', offset);
+  // Add cache-busting parameter to prevent 304 responses
+  params.append('_t', Date.now());
+  
+  const queryString = params.toString();
+  return request(`api/clippings/${clippingId}/features?${queryString}`, {
+    headers: { 
+      ...authHeaders(),
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache'
+    }
+  });
+}
+
+export function updateClipping(clippingId, updates) {
+  return request(`api/clippings/${clippingId}`, {
+    method: 'PUT',
+    headers: { ...authHeaders() },
+    body: JSON.stringify(updates)
+  });
+}
+
+export function deleteClipping(clippingId) {
+  return request(`api/clippings/${clippingId}`, {
+    method: 'DELETE',
+    headers: { ...authHeaders() }
+  });
+}
+
+export function convertClippingToDataset(clippingId) {
+  return request(`api/clippings/${clippingId}/convert-to-dataset`, {
+    method: 'POST',
+    headers: { ...authHeaders() }
+  });
+}
+
 export { API_BASE };
 
 

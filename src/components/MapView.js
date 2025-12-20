@@ -97,6 +97,7 @@ const MapView = () => {
   const [queryResults, setQueryResults] = useState(null);
   const [highlightedFeatures, setHighlightedFeatures] = useState([]);
   const [analysisResults, setAnalysisResults] = useState([]); // Track analysis results
+  const [loadedClippings, setLoadedClippings] = useState([]); // Track loaded clippings
   
   const [mapLayers, setMapLayers] = useState([
     { 
@@ -279,7 +280,16 @@ const MapView = () => {
     try {
       const resp = await listLayers();
       const layers = resp?.data?.layers || resp?.data || [];
-      setServerLayers(layers.map(l => ({ ...l, visible: true })));
+      // Preserve existing visibility state when refreshing
+      setServerLayers(prevLayers => {
+        const prevMap = new Map(prevLayers.map(l => [l._id, l]));
+        return layers.map(l => ({
+          ...l,
+          visible: prevMap.has(l._id) 
+            ? prevMap.get(l._id).visible  // Preserve existing visibility
+            : (l.type === 'raster' ? true : false)  // Default: raster visible, vector hidden
+        }));
+      });
       
       // Preload features for new layers
       for (const l of layers) {
@@ -302,7 +312,11 @@ const MapView = () => {
         const layers = resp?.data?.layers || resp?.data || [];
         console.log('Layers API response:', resp);
         console.log('Layers array:', layers);
-        setServerLayers(layers.map(l => ({ ...l, visible: true })));
+        // On initial load: vector layers default to false (hidden), raster to true (visible)
+        setServerLayers(layers.map(l => ({ 
+          ...l, 
+          visible: l.type === 'raster' ? true : false
+        })));
         // Preload small feature sets
         for (const l of layers) {
           try {
@@ -315,6 +329,44 @@ const MapView = () => {
         }
       } catch (_) {}
     })();
+  }, []);
+
+  // Load clippings from localStorage and listen for updates
+  useEffect(() => {
+    const loadClippings = () => {
+      try {
+        const stored = localStorage.getItem('loadedClippings');
+        if (stored) {
+          const clippings = JSON.parse(stored);
+          setLoadedClippings(clippings);
+        }
+      } catch (error) {
+        console.error('Error loading clippings from localStorage:', error);
+      }
+    };
+
+    // Load on mount
+    loadClippings();
+
+    // Listen for storage events (when clippings are loaded from another tab/component)
+    const handleStorageChange = (e) => {
+      if (e.key === 'loadedClippings') {
+        loadClippings();
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    
+    // Also listen for custom event (for same-tab updates)
+    const handleClippingLoaded = () => {
+      loadClippings();
+    };
+    window.addEventListener('clippingLoaded', handleClippingLoaded);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('clippingLoaded', handleClippingLoaded);
+    };
   }, []);
 
   // Component to handle map events
@@ -935,6 +987,107 @@ const MapView = () => {
               pathOptions={{ color: shape.color, fillOpacity: 0.3 }}
             />
           ))}
+
+          {/* Loaded Clippings */}
+          {loadedClippings.map((clipping, clipIdx) => {
+            if (!clipping.features || clipping.features.length === 0) return null;
+            
+            const clippingColor = clipping.style?.color || '#00bcd4'; // Cyan color for clippings
+            const clippingWeight = clipping.style?.weight || 3;
+            const clippingFillOpacity = clipping.style?.fillOpacity ?? 0.4;
+            
+            return clipping.features.map((f, i) => {
+              if (f.geometry?.type === 'Point') {
+                const [lng, lat] = f.geometry.coordinates;
+                return (
+                  <Marker 
+                    key={`clipping-${clipIdx}-pt-${i}`} 
+                    position={[lat, lng]}
+                    icon={L.divIcon({
+                      className: 'clipping-marker',
+                      html: `<div style="
+                        width: 16px; 
+                        height: 16px; 
+                        background-color: ${clippingColor}; 
+                        border: 2px solid white; 
+                        border-radius: 50%; 
+                        box-shadow: 0 0 8px rgba(0, 188, 212, 0.6);
+                      "></div>`,
+                      iconSize: [16, 16],
+                      iconAnchor: [8, 8]
+                    })}
+                  >
+                    <Popup>
+                      <Typography variant="subtitle2" sx={{ color: clippingColor }}>
+                        {clipping.name}
+                      </Typography>
+                      <Typography variant="body2">
+                        Feature {i + 1} of {clipping.features.length}
+                      </Typography>
+                      {f.properties && Object.keys(f.properties).length > 0 && (
+                        <Box sx={{ mt: 1 }}>
+                          {Object.entries(f.properties).slice(0, 3).map(([key, value]) => (
+                            <Typography key={key} variant="caption" display="block">
+                              <strong>{key}:</strong> {String(value)}
+                            </Typography>
+                          ))}
+                        </Box>
+                      )}
+                    </Popup>
+                  </Marker>
+                );
+              }
+              if (f.geometry?.type === 'LineString') {
+                const positions = f.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+                return (
+                  <Polyline 
+                    key={`clipping-${clipIdx}-ln-${i}`} 
+                    positions={positions} 
+                    pathOptions={{ 
+                      color: clippingColor, 
+                      weight: clippingWeight,
+                      opacity: 0.9
+                    }} 
+                  />
+                );
+              }
+              if (f.geometry?.type === 'Polygon') {
+                const positions = f.geometry.coordinates[0].map(([lng, lat]) => [lat, lng]);
+                return (
+                  <Polygon 
+                    key={`clipping-${clipIdx}-pg-${i}`} 
+                    positions={positions} 
+                    pathOptions={{ 
+                      color: clippingColor, 
+                      weight: clippingWeight,
+                      fillColor: clippingColor,
+                      fillOpacity: clippingFillOpacity,
+                      opacity: 0.9
+                    }} 
+                  >
+                    <Popup>
+                      <Typography variant="subtitle2" sx={{ color: clippingColor }}>
+                        {clipping.name}
+                      </Typography>
+                      <Typography variant="body2">
+                        Feature {i + 1} of {clipping.features.length}
+                      </Typography>
+                      {f.properties && Object.keys(f.properties).length > 0 && (
+                        <Box sx={{ mt: 1 }}>
+                          {Object.entries(f.properties).slice(0, 3).map(([key, value]) => (
+                            <Typography key={key} variant="caption" display="block">
+                              <strong>{key}:</strong> {String(value)}
+                            </Typography>
+                          ))}
+                        </Box>
+                      )}
+                    </Popup>
+                  </Polygon>
+                );
+              }
+              return null;
+            });
+          })}
         </MapContainer>
 
         {/* Top Search Bar */}
@@ -1811,10 +1964,18 @@ const MapView = () => {
                       await createFeature(selectedFeature.layerId, selectedFeature);
                     }
                     setSelectedFeature(null);
-                    // Refresh layer data
+                    // Refresh layer data - preserve visibility state
                     const resp = await listLayers();
                     const layers = resp?.data?.layers || resp?.data || [];
-                    setServerLayers(layers.map(l => ({ ...l, visible: true })));
+                    setServerLayers(prevLayers => {
+                      const prevMap = new Map(prevLayers.map(l => [l._id, l]));
+                      return layers.map(l => ({
+                        ...l,
+                        visible: prevMap.has(l._id) 
+                          ? prevMap.get(l._id).visible  // Preserve existing visibility
+                          : (l.type === 'raster' ? true : false)  // Default: raster visible, vector hidden
+                      }));
+                    });
                   } catch (e) {
                     console.error('Failed to save feature:', e);
                   }
@@ -1838,10 +1999,18 @@ const MapView = () => {
                     try {
                       await deleteFeature(selectedFeature.layerId, selectedFeature._id);
                       setSelectedFeature(null);
-                      // Refresh layer data
-                      const resp = await listLayers();
-                      const layers = resp?.data?.layers || resp?.data || [];
-                      setServerLayers(layers.map(l => ({ ...l, visible: true })));
+                    // Refresh layer data - preserve visibility state
+                    const resp = await listLayers();
+                    const layers = resp?.data?.layers || resp?.data || [];
+                    setServerLayers(prevLayers => {
+                      const prevMap = new Map(prevLayers.map(l => [l._id, l]));
+                      return layers.map(l => ({
+                        ...l,
+                        visible: prevMap.has(l._id) 
+                          ? prevMap.get(l._id).visible  // Preserve existing visibility
+                          : (l.type === 'raster' ? true : false)  // Default: raster visible, vector hidden
+                      }));
+                    });
                     } catch (e) {
                       console.error('Failed to delete feature:', e);
                     }

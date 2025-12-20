@@ -63,6 +63,7 @@ import {
   Settings as SettingsIcon
 } from '@mui/icons-material';
 import { uploadDataset, listDatasets, getLayerFeatures } from '../services/api';
+import ClippingsManager from './ClippingsManager';
 
 const DataManager = () => {
   const [tabValue, setTabValue] = useState(0);
@@ -437,6 +438,22 @@ const DataManager = () => {
             <Typography variant="h4">
               Data Manager
             </Typography>
+          </Box>
+
+          {/* Tabs */}
+          <Tabs 
+            value={tabValue} 
+            onChange={(e, newValue) => setTabValue(newValue)}
+            sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}
+          >
+            <Tab label="Datasets" />
+            <Tab label="Clippings" />
+          </Tabs>
+
+          {/* Tab Content */}
+          {tabValue === 0 && (
+            <>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
             <Box sx={{ display: 'flex', gap: 1 }}>
               <Button
                 variant="contained"
@@ -778,6 +795,26 @@ const DataManager = () => {
           </Grid>
         </Paper>
       )}
+            </>
+          )}
+
+          {tabValue === 1 && (
+            <ClippingsManager 
+              onClippingSelect={(clipping) => {
+                // Handle clipping selection if needed
+                console.log('Clipping selected:', clipping);
+              }}
+              onClippingLoad={(clipping) => {
+                // Handle loading clipping on map
+                console.log('Load clipping on map:', clipping);
+                setSnackbar({
+                  open: true,
+                  message: 'Clipping loaded. Switch to Map View to see it.',
+                  severity: 'info'
+                });
+              }}
+            />
+          )}
         </>
       )}
 
