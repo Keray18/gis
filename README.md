@@ -1,70 +1,199 @@
-# Getting Started with Create React App
+GeoAnalytics – Full-Stack GIS & Terrain Analytics Platform
+=========================================================
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+GeoAnalytics is a full-stack GIS and terrain analytics platform that combines a
+powerful Node.js geospatial backend with a modern React + Leaflet web frontend.
+It enables users to upload, manage, visualize, and analyze spatial datasets
+(vectors and rasters) through an interactive web-based map interface.
 
-## Available Scripts
+The platform is designed for advanced spatial analysis workflows, including
+terrain analytics on GeoTIFFs, spatial queries, and layer-based visualization.
 
-In the project directory, you can run:
 
-### `npm start`
+---------------------------------------------------------
+FEATURES
+---------------------------------------------------------
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+1. Interactive GIS Web Application (Frontend)
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+- Dark-themed interactive map viewer
+- Multiple basemaps:
+  - OpenStreetMap
+  - Satellite
+  - Terrain
+  - Hybrid
+  - Dark
+- Layer management:
+  - Base layers
+  - Demo layers
+  - Uploaded vector layers
+  - Raster layers
+- Server-driven layers fetched dynamically from the backend
+- Attribute and spatial queries with result highlighting
+- Measurement tools for distance/path measurement
+- User location tools with accuracy circle and smart zoom
+- Feature editing:
+  - Create, update, delete vector features
+- Raster styling controls:
+  - Color ramps
+  - Band selection
+  - Opacity
+  - Rendering options
+- Terrain analysis panel for raster datasets
+- Clippings & overlays:
+  - Visualization of precomputed analysis layers
+- Alerts panel UI (earthquake, flood, disaster alerts – extensible)
+- JWT-authenticated experience
+- Drawer-based navigation (Map, Layers, Data, Admin, etc.)
 
-### `npm test`
+---------------------------------------------------------
+2. GeoAnalytics Backend (Node.js / Express)
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+- Node.js + Express REST API
+- MongoDB with Mongoose ODM
+- JWT-based authentication
+- Role-based access control (admin / user)
+- Secure password handling (bcrypt)
 
-### `npm run build`
+Dataset Management:
+- Upload spatial datasets (up to 500MB, configurable):
+  - GeoJSON
+  - Shapefile
+  - KML
+  - GeoTIFF
+  - CSV
+  - GPX
+- Automatic format detection
+- Processing pipeline with validation and error handling
+- Export capabilities (GeoJSON / CSV)
+- Feature-level access with:
+  - Pagination
+  - Bounding-box filtering
+  - Attribute-based filters
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+Layer Management:
+- Vector and raster layers linked to datasets
+- Layer styling:
+  - Simple styles
+  - Category-based styles
+- Layer properties:
+  - Opacity
+  - Visibility
+  - Ordering
+- APIs for:
+  - Updating styles
+  - Toggling visibility
+  - Reordering layers
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+Spatial & Analytical Services:
+- Spatial queries:
+  - Buffer
+  - Point-in-polygon
+  - Bounding-box search
+  - Attribute filters
+- Advanced analytics:
+  - Spatial joins
+  - Nearest-feature queries
+  - Descriptive statistics
+- Raster processing using:
+  - geotiff
+  - geoblaze
+  - @turf/turf
+- Terrain analysis APIs:
+  - Elevation statistics
+  - Slope & aspect
+  - Terrain-derived metrics
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+Documentation & Tooling:
+- API documentation
+- Terrain analysis guides
+- File format support docs
+- Postman collections
+- Test upload scripts
+- Troubleshooting guides
 
-### `npm run eject`
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+---------------------------------------------------------
+TECH STACK
+---------------------------------------------------------
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+Frontend (gis):
+- React (Create React App)
+- Leaflet / React Leaflet
+- Material UI (MUI)
+- JWT-based authentication
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+Backend (GeoAnalytics-Backend):
+- Node.js
+- Express
+- MongoDB
+- Mongoose
+- Multer (file uploads)
+- GeoTIFF / GeoBlaze / Turf.js
+- CSV / KML / GPX parsers
+- JWT, bcrypt, CORS
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
 
-## Learn More
+---------------------------------------------------------
+MONOREPO STRUCTURE
+---------------------------------------------------------
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+.
+├─ GeoAnalytics-Backend/
+│  ├─ src/
+│  │  ├─ models/        # User, Dataset, Layer, Project, Clipping, etc.
+│  │  ├─ controllers/   # Auth, datasets, layers, raster, terrain, projects
+│  │  ├─ services/      # Spatial & raster processing logic
+│  │  ├─ routes/        # REST API routes
+│  │  └─ app.js
+│  ├─ uploads/          # Uploaded geospatial files
+│  ├─ ENV_SETUP.md
+│  ├─ API_DOCUMENTATION.md
+│  ├─ TERRAIN_ANALYSIS_API.md
+│  ├─ TERRAIN_ANALYSIS_GUIDE.md
+│  ├─ FILE_FORMAT_SUPPORT.md
+│  └─ README.md
+│
+└─ gis/
+   ├─ src/
+   │  ├─ components/    # MapView, LayerManager, DataManager, AdminDashboard
+   │  ├─ pages/         # Authentication pages
+   │  └─ services/
+   │     └─ api.js      # Backend API client
+   └─ package.json
 
-To learn React, check out the [React documentation](https://reactjs.org/).
 
-### Code Splitting
+---------------------------------------------------------
+USE CASES
+---------------------------------------------------------
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+- GIS data visualization and exploration
+- Terrain and elevation analysis
+- Spatial analytics dashboards
+- Disaster risk and alert visualization
+- Research and academic GIS projects
+- Internal geospatial tooling for organizations
 
-### Analyzing the Bundle Size
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+---------------------------------------------------------
+STATUS
+---------------------------------------------------------
 
-### Making a Progressive Web App
+This project is actively developed and structured for extensibility.
+Several analytical components include placeholders for future
+enhancements (e.g., advanced style analysis, originality detection).
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
 
-### Advanced Configuration
+---------------------------------------------------------
+LICENSE
+---------------------------------------------------------
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
+Specify your license here (e.g., MIT, Apache 2.0).
 
-### Deployment
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
+---------------------------------------------------------
+AUTHOR
+---------------------------------------------------------
 
-### `npm run build` fails to minify
+Developed by: [Your Name / Organization]
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
