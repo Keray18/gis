@@ -15,6 +15,7 @@ import AdminDashboard from './components/AdminDashboard';
 import LayerManager from './components/LayerManager';
 import DataVisualization from './components/DataVisualization';
 import DataManager from './components/DataManager';
+import HowToUse from './components/HowToUse';
 import Auth from './pages/Auth';
 import './App.css';
 
@@ -62,6 +63,7 @@ function App() {
     { text: 'Data Visualization', icon: <AnalyticsIcon />, view: 'visualization' },
     { text: 'Data Manager', icon: <DataObjectIcon />, view: 'data' },
     { text: 'Admin Dashboard', icon: <SettingsIcon />, view: 'admin' },
+    { text: 'How to Use', icon: <AnalyticsIcon />, view: 'help' },
   ];
 
   const renderCurrentView = () => {
@@ -86,6 +88,8 @@ function App() {
         return <DataManager />;
       case 'admin':
         return <AdminDashboard />;
+      case 'help':
+        return <HowToUse />;
       case 'auth':
         return <Auth onSubmit={(data) => {
           setIsAuthed(true);

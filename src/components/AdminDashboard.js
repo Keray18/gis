@@ -54,6 +54,7 @@ import {
   Pie,
   Cell
 } from 'recharts';
+import { getUsers, updateUserApi, deleteUserApi, listDatasets } from '../services/api';
 
 const AdminDashboard = () => {
   const [users, setUsers] = useState([]);
@@ -67,37 +68,39 @@ const AdminDashboard = () => {
     status: 'active'
   });
 
-  // Mock data for demonstration
-  const mockUsers = [
-    { id: 1, name: 'John Doe', email: 'john@example.com', role: 'admin', status: 'active', lastLogin: '2024-01-08', avatar: 'JD' },
-    { id: 2, name: 'Jane Smith', email: 'jane@example.com', role: 'user', status: 'active', lastLogin: '2024-01-07', avatar: 'JS' },
-    { id: 3, name: 'Bob Johnson', email: 'bob@example.com', role: 'user', status: 'inactive', lastLogin: '2024-01-05', avatar: 'BJ' },
-    { id: 4, name: 'Alice Brown', email: 'alice@example.com', role: 'moderator', status: 'active', lastLogin: '2024-01-08', avatar: 'AB' },
-  ];
-
   const mockAnalytics = {
-    totalUsers: 1247,
-    activeUsers: 892,
-    totalMaps: 156,
+    totalUsers: users.length,
+    activeUsers: users.filter(u => u.status === 'active').length,
+    totalMaps: 15,
     storageUsed: '2.3 GB'
   };
 
   const mockChartData = [
-    { name: 'Jan', users: 400, maps: 24 },
-    { name: 'Feb', users: 300, maps: 13 },
-    { name: 'Mar', users: 200, maps: 98 },
-    { name: 'Apr', users: 278, maps: 39 },
-    { name: 'May', users: 189, maps: 48 },
-    { name: 'Jun', users: 239, maps: 38 },
+    { name: 'Jan', users: 40, maps: 24 },
+    { name: 'Feb', users: 30, maps: 13 },
+    { name: 'Mar', users: 20, maps: 98 },
+    { name: 'Apr', users: 27, maps: 39 },
+    { name: 'May', users: 18, maps: 48 },
+    { name: 'Jun', users: users.length, maps: 38 },
   ];
 
   const mockPieData = [
-    { name: 'Active Users', value: 892, color: '#1976d2' },
-    { name: 'Inactive Users', value: 355, color: '#dc004e' },
+    { name: 'Active Users', value: users.filter(u => u.status === 'active').length || 1, color: '#1976d2' },
+    { name: 'Inactive Users', value: users.filter(u => u.status !== 'active').length || 0, color: '#dc004e' },
   ];
 
+  const fetchUsers = async () => {
+    try {
+      const resp = await getUsers();
+      setUsers(resp?.data || []);
+    } catch (error) {
+      console.error("Error fetching users:", error);
+      setSnackbar({ open: true, message: 'Failed to load users', severity: 'error' });
+    }
+  };
+
   useEffect(() => {
-    setUsers(mockUsers);
+    fetchUsers();
   }, []);
 
   const handleAddUser = () => {
@@ -112,30 +115,31 @@ const AdminDashboard = () => {
     setOpenDialog(true);
   };
 
-  const handleSaveUser = () => {
+  const handleSaveUser = async () => {
     if (selectedUser) {
-      // Edit existing user
-      setUsers(prev => prev.map(user => 
-        user.id === selectedUser.id ? { ...user, ...newUser } : user
-      ));
-      setSnackbar({ open: true, message: 'User updated successfully', severity: 'success' });
+      try {
+        await updateUserApi(selectedUser._id, newUser);
+        setSnackbar({ open: true, message: 'User updated successfully', severity: 'success' });
+        fetchUsers();
+      } catch (error) {
+        setSnackbar({ open: true, message: 'Failed to update user', severity: 'error' });
+      }
     } else {
-      // Add new user
-      const user = {
-        ...newUser,
-        id: Date.now(),
-        lastLogin: new Date().toISOString().split('T')[0],
-        avatar: newUser.name.split(' ').map(n => n[0]).join('')
-      };
-      setUsers(prev => [...prev, user]);
-      setSnackbar({ open: true, message: 'User added successfully', severity: 'success' });
+      // Add new user is not supported via this form currently, as passwords are required.
+      // But typically this would call a create endpoint.
+      setSnackbar({ open: true, message: 'Add user not implemented. Please register normally.', severity: 'info' });
     }
     setOpenDialog(false);
   };
 
-  const handleDeleteUser = (userId) => {
-    setUsers(prev => prev.filter(user => user.id !== userId));
-    setSnackbar({ open: true, message: 'User deleted successfully', severity: 'success' });
+  const handleDeleteUser = async (userId) => {
+    try {
+      await deleteUserApi(userId);
+      setSnackbar({ open: true, message: 'User deleted successfully', severity: 'success' });
+      fetchUsers();
+    } catch (error) {
+      setSnackbar({ open: true, message: 'Failed to delete user', severity: 'error' });
+    }
   };
 
   const getStatusColor = (status) => {
@@ -318,11 +322,11 @@ const AdminDashboard = () => {
             </TableHead>
             <TableBody>
               {users.map((user) => (
-                <TableRow key={user.id}>
+                <TableRow key={user._id}>
                   <TableCell>
                     <Box sx={{ display: 'flex', alignItems: 'center' }}>
                       <Avatar sx={{ mr: 2, bgcolor: 'primary.main' }}>
-                        {user.avatar}
+                        {user.name ? user.name[0].toUpperCase() : 'U'}
                       </Avatar>
                       {user.name}
                     </Box>
@@ -337,17 +341,17 @@ const AdminDashboard = () => {
                   </TableCell>
                   <TableCell>
                     <Chip
-                      label={user.status}
-                      color={getStatusColor(user.status)}
+                      label={user.status || 'active'}
+                      color={getStatusColor(user.status || 'active')}
                       size="small"
                     />
                   </TableCell>
-                  <TableCell>{user.lastLogin}</TableCell>
+                  <TableCell>{new Date(user.createdAt).toLocaleDateString()}</TableCell>
                   <TableCell>
                     <IconButton size="small" onClick={() => handleEditUser(user)}>
                       <EditIcon />
                     </IconButton>
-                    <IconButton size="small" onClick={() => handleDeleteUser(user.id)}>
+                    <IconButton size="small" onClick={() => handleDeleteUser(user._id)}>
                       <DeleteIcon />
                     </IconButton>
                   </TableCell>

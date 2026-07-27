@@ -57,6 +57,10 @@ import './MapView.css';
 import { listLayers, getLayerFeatures, queryLayerAttribute, queryLayerBuffer, queryPointInPolygon, createFeature, updateFeature, deleteFeature, getRasterTileUrl, updateRasterStyling, listDatasets } from '../services/api';
 import RasterStylePanel from './RasterStylePanel';
 import TerrainAnalysisPanel from './TerrainAnalysisPanel';
+import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
+import '@geoman-io/leaflet-geoman-free';
+import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
 
 // Fix for default markers in react-leaflet
 delete L.Icon.Default.prototype._getIconUrl;
@@ -369,9 +373,75 @@ const MapView = () => {
     };
   }, []);
 
+  const handleExportMap = async (format) => {
+    if (!mapRef.current) return;
+    const mapElement = document.querySelector('.leaflet-container');
+    if (!mapElement) return;
+
+    try {
+      // Leaflet controls (zoom, etc) can sometimes taint the canvas if they have external SVGs
+      const canvas = await html2canvas(mapElement, {
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: null
+      });
+
+      if (format === 'png') {
+        const link = document.createElement('a');
+        link.download = `Map-Export-${new Date().toISOString().slice(0,10)}.png`;
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+      } else if (format === 'pdf') {
+        const imgData = canvas.toDataURL('image/png');
+        const pdf = new jsPDF({
+          orientation: canvas.width > canvas.height ? 'landscape' : 'portrait',
+          unit: 'px',
+          format: [canvas.width, canvas.height]
+        });
+        pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+        pdf.save(`Map-Export-${new Date().toISOString().slice(0,10)}.pdf`);
+      }
+    } catch (error) {
+      console.error("Error exporting map:", error);
+    }
+  };
+
   // Component to handle map events
   const MapEvents = () => {
     const map = useMap();
+
+    useEffect(() => {
+      if (editingMode) {
+        map.pm.addControls({
+          position: 'topleft',
+          drawCircle: false,
+          drawCircleMarker: false,
+          drawText: false,
+        });
+
+        const handleCreate = (e) => {
+          const { layer } = e;
+          const geojson = layer.toGeoJSON();
+          setDrawnShapes(prev => [...prev, {
+            positions: layer.getLatLngs ? layer.getLatLngs() : layer.getLatLng(),
+            color: '#ff4081',
+            geojson: geojson
+          }]);
+          // Optionally, remove the layer since we render it through state, or keep it and avoid duplicating
+          // map.removeLayer(layer); 
+        };
+
+        map.on('pm:create', handleCreate);
+
+        return () => {
+          map.pm.removeControls();
+          map.off('pm:create', handleCreate);
+        };
+      } else {
+        map.pm.removeControls();
+      }
+    }, [map, editingMode]);
+
     useMapEvents({
       click: (e) => {
         const { lat, lng } = e.latlng;
@@ -1264,6 +1334,12 @@ const MapView = () => {
           <Tooltip title="Refresh">
             <IconButton onClick={() => window.location.reload()} sx={{ color: 'white' }}>
               <RefreshIcon />
+            </IconButton>
+          </Tooltip>
+
+          <Tooltip title="Export Map (PNG)">
+            <IconButton onClick={() => handleExportMap('png')} sx={{ color: 'white' }}>
+              <DownloadIcon />
             </IconButton>
           </Tooltip>
         </Paper>

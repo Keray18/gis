@@ -77,6 +77,26 @@ export async function registerApi({ name, email, password }) {
   return { token, user, raw: resp };
 }
 
+// User Admin APIs
+export function getUsers() {
+  return request('api/users', { headers: { ...authHeaders() } });
+}
+
+export function updateUserApi(userId, userData) {
+  return request(`api/users/${userId}`, {
+    method: 'PUT',
+    headers: { ...authHeaders() },
+    body: JSON.stringify(userData)
+  });
+}
+
+export function deleteUserApi(userId) {
+  return request(`api/users/${userId}`, {
+    method: 'DELETE',
+    headers: { ...authHeaders() }
+  });
+}
+
 // Dataset & Layer APIs
 export async function uploadDataset(file) {
   const url = buildUrl('api/datasets/upload');
