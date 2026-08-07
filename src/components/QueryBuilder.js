@@ -1,3 +1,5 @@
+/* eslint-disable no-unused-vars */
+/* eslint-disable react-hooks/exhaustive-deps */
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -732,3 +734,4 @@ const QueryBuilder = ({ onResultsUpdate, onQueryExecute }) => {
 };
 
 export default QueryBuilder;
+

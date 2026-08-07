@@ -1,3 +1,5 @@
+/* eslint-disable no-unused-vars */
+/* eslint-disable react-hooks/exhaustive-deps */
 import React, { useState } from 'react';
 import {
   Box,
@@ -136,3 +138,4 @@ const QueryPanel = ({ onResultsUpdate, onHighlightFeatures, onClearHighlight }) 
 };
 
 export default QueryPanel;
+

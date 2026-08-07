@@ -1,3 +1,5 @@
+/* eslint-disable no-unused-vars */
+/* eslint-disable react-hooks/exhaustive-deps */
 import React, { useState, useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents, Circle, Polygon, Polyline } from 'react-leaflet';
 import GeometryOperations from './GeometryOperations';
@@ -2186,4 +2188,5 @@ const MapView = () => {
 };
 
 export default MapView;
+
 

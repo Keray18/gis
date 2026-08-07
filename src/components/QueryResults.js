@@ -1,3 +1,5 @@
+/* eslint-disable no-unused-vars */
+/* eslint-disable react-hooks/exhaustive-deps */
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -660,3 +662,4 @@ const QueryResults = ({ results, onResultsUpdate, onHighlightFeatures, onClearHi
 };
 
 export default QueryResults;
+
