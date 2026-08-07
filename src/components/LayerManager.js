@@ -85,12 +85,12 @@ const LayerManager = () => {
     {
       id: 5,
       name: 'Weather Stations',
-      type: 'marker',
-      url: 'https://api.openweathermap.org/data/2.5/weather',
+      type: 'tile',
+      url: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png',
       visible: true,
       opacity: 1,
       category: 'weather',
-      description: 'Weather station locations and data'
+      description: 'Precipitation Radar (IEM Nexrad)'
     }
   ]);
 

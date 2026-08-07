@@ -148,9 +148,9 @@ const MapView = () => {
       opacity: 0.7, 
       type: 'raster',
       color: '#ff6b6b',
-      description: 'Population density visualization',
-      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Demographics/USA_Population_Density/MapServer/tile/{z}/{y}/{x}',
-      attribution: '&copy; Esri'
+      description: 'Population density visualization (SEDAC)',
+      url: 'https://sedac.ciesin.columbia.edu/geoserver/gwc/service/wmts?layer=gpw-v4:gpw-v4-population-density_2020&style=&tilematrixset=EPSG:3857&Service=WMTS&Request=GetTile&Version=1.0.0&Format=image/png&TileMatrix=EPSG:3857:{z}&TileCol={x}&TileRow={y}',
+      attribution: 'NASA SEDAC'
     },
     { 
       name: 'Transportation', 
@@ -158,9 +158,9 @@ const MapView = () => {
       opacity: 0.8, 
       type: 'vector',
       color: '#4ecdc4',
-      description: 'Transportation networks',
-      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
-      attribution: '&copy; Esri'
+      description: 'Transportation networks (OpenRailwayMap)',
+      url: 'https://{s}.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png',
+      attribution: '&copy; OpenStreetMap contributors, OpenRailwayMap'
     },
     { 
       name: 'Land Use', 
@@ -169,7 +169,7 @@ const MapView = () => {
       type: 'raster',
       color: '#45b7d1',
       description: 'Land use classification',
-      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Physical_Map/MapServer/tile/{z}/{y}/{x}',
+      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
       attribution: '&copy; Esri'
     },
     { 
@@ -178,9 +178,19 @@ const MapView = () => {
       opacity: 0.5, 
       type: 'raster',
       color: '#96ceb4',
-      description: 'Digital elevation model',
-      url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Terrain_Base/MapServer/tile/{z}/{y}/{x}',
-      attribution: '&copy; Esri'
+      description: 'USGS 3DEP Shaded Relief',
+      url: 'https://basemap.nationalmap.gov/arcgis/rest/services/USGSShadedReliefOnly/MapServer/tile/{z}/{y}/{x}',
+      attribution: 'USGS'
+    },
+    {
+      name: 'Weather',
+      visible: false,
+      opacity: 0.6,
+      type: 'raster',
+      color: '#3498db',
+      description: 'Precipitation Radar (IEM Nexrad)',
+      url: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png',
+      attribution: 'Iowa Environmental Mesonet'
     }
   ]);
 
